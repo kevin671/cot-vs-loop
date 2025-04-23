@@ -1,25 +1,22 @@
 # separation
-Code for "On Separation Between Chain-of-Thought and Latent Thoughts: Deciding and Probabilistic Reasoning"
+Code for "On Separation Between Chain-of-Thought and Looped Transformers"
 
 ## Decision Problem
 
+solving linear equations
 
-### Parallel Complexity (Feng et al., 2023)
+testing for perfect matching in bipartite graphs
 
+membership testing for fixed context-free grammars
 
-### graph reasoning tasks (Sanford, et al., 2024)
-
+dynamic programming
 
 ## Probabilistic Reasoning
 
+Bayesian networks, CoT as Chain rule (Prystawski et al., 2023)
 
-### CoT as Chain rule (Prystawski et al., 2023)
 
-Bayesian netowkrs
-
-### Probabilistic Inferece (Qiu et al., 2025)
-
-### Constrained decoding
+Constrained generation
 
 
 ## acknowledgement
