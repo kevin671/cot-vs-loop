@@ -1,5 +1,5 @@
-# separation
-Code for "On Separation Between Chain-of-Thought and Looped Transformers"
+# To CoT or To Loop?
+Code for "To CoT or To Loop? A Formal Comparison Between Chain-of-Thought and Looped Transformers"
 
 ## Decision Problem
 
