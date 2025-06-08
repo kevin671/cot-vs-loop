@@ -8,7 +8,7 @@ from tqdm import tqdm
 from transformers import get_scheduler, set_seed
 
 import wandb
-from model import LoopedGPT
+from model import GPT, LoopedGPT
 
 
 def evaluate(cur_loader, max_iter=None):
@@ -44,6 +44,8 @@ parser.add_argument("--epoch", type=int, default=50)
 parser.add_argument("--warmup", type=int, default=5)
 parser.add_argument("--output_dir", type=str, default="./output/log")
 parser.add_argument("--wandb_name", type=str, default="CoT-vs-Loop")
+# CoT or Looped
+parser.add_argument("--model_name", type=str, default="Looped")
 parser.add_argument("--maxlen", type=int, default=120)
 parser.add_argument("--maxdata", type=int, default=120)
 parser.add_argument("--maxans", type=int, default=30)
@@ -100,7 +102,11 @@ wandb.init(project="CoT-vs-Loop", config=args, name=args.wandb_name)
 # local_rank = int(os.environ["LOCAL_RANK"])
 # torch.cuda.set_device(local_rank)
 # dist.barrier()
-model = LoopedGPT(args).cuda()
+if args.model_name == "Looped":
+    model = LoopedGPT(args).cuda()
+else:
+    model = GPT(args).cuda()
+
 if args.model_path:
     model.load_state_dict(torch.load(args.model_path), strict=True)
 # model = DDP(model, device_ids=[local_rank])
@@ -115,6 +121,9 @@ for epoch in range(args.epoch):
     pbar = tqdm(loader) if not args.write2file else loader
     for data_iter_step, (input_ids, y, _) in enumerate(pbar):
         inputs, y = input_ids.cuda(), y.long().cuda()
+        if args.model_name == "Looped":
+            input_mask = (y != 0).cuda()
+            inputs = inputs.masked_fill(~input_mask, 0)
         logits = model(inputs)
         loss = criterion(logits.transpose(1, 2), y)
         optimizer.zero_grad()
