@@ -1,0 +1,11 @@
+.venv
+*.sh.*
+__pycache__
+*.bin
+downloads/
+wandb/
+out/
+*.sh
+data/
+output/
+binary/unigen
