@@ -11,6 +11,6 @@ Linear Equation
 
 Ancestral Sampling from Bayesian Networks
 
-## acknowledgement
+## Acknowledgement
 - [Towards Revealing the Mystery behind Chain of Thought: a Theoretical Perspective (NeurIPS 2023)](https://github.com/guyuntian/CoT_benchmark)
 - [Why think step by step? Reasoning emerges from the locality of experience (NeurIPS 2023)](https://github.com/benpry/why-think-step-by-step)

@@ -134,10 +134,10 @@ while len(test_set) < args.test_size:
     maxhistory = max(maxhistory, len(history))
 
 decoder = f"{args.file}/decoder"
-# chain = f"{args.file}/chain"
+chain = f"{args.file}/chain"
 os.makedirs(f"{args.file}", exist_ok=True)
 os.makedirs(decoder, exist_ok=True)
-# os.makedirs(chain, exist_ok=True)
+os.makedirs(chain, exist_ok=True)
 
 with open(f"{decoder}/train_data.txt", "w") as f1:
     for history in train_set:
@@ -155,7 +155,6 @@ with open(f"{decoder}/test_data.txt", "w") as f1:
                 break
         print(history[-1], file=f1)
 
-"""
 with open(f"{chain}/train_data.txt", "w") as f1:
     for history in train_set:
         for i in history:
@@ -171,7 +170,6 @@ with open(f"{chain}/test_data.txt", "w") as f1:
                     break
             print("", file=f1)
             print(history[-1], file=f2)
-"""
 
-print(f"max direct len:{maxlen}")
-# print(f"max cot len:{maxhistory}")
+print(f"max direct len:{maxlen}") 
+print(f"max cot len:{maxhistory}")
