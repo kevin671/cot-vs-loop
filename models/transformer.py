@@ -202,6 +202,9 @@ class LoopedTF(nn.Module):
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.vocab_size, config.n_embd),
+                # `wpe` is a ModuleList of positional embeddings, one for each loop iteration.
+                # In the future, this can be replaced with a single embedding function of both position and loop index,
+                # similar to the approach used in Universal Transformers.
                 wpe=nn.ModuleList([nn.Embedding(config.block_size, config.n_embd) for _ in range(config.n_loop)]),
                 drop=nn.Dropout(config.dropout),
                 h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
