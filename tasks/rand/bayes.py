@@ -1,3 +1,10 @@
+# ただのサンプリングだけど、問題を
+# loopedはとりあえずend-to-endでやる
+# chainは確率を計算する必要がある...　これをちゃんと実装できるか。めんどくさいな...
+# なんかサンプリングしてカウントだけで良いか
+
+
+
 import itertools
 import os
 import random
