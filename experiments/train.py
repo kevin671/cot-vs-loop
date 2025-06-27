@@ -4,10 +4,10 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import wandb
 from tqdm import tqdm
 from transformers import get_scheduler, set_seed
 
-import wandb
 from models.transformer import GPT, LoopedTF
 
 
@@ -39,16 +39,19 @@ def main():
     parser.add_argument("--input_length", type=int)
 
     parser.add_argument("--learning_rate", type=float, default=1e-4)
-    parser.add_argument("--epoch", type=int, default=50)
-    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--epoch", type=int, default=100)
+    parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--weight_decay", type=float, default=0.01)
 
     parser.add_argument("--model", type=str, default="Looped", choices=["Looped", "GPT"])
     parser.add_argument("--n_embd", type=int, default=256)
     parser.add_argument("--n_head", type=int, default=4)
-    parser.add_argument("--n_layer", type=int, default=3)
-    parser.add_argument("--n_loop", type=int, default=10)
+    parser.add_argument("--n_layer", type=int, default=2)
+    parser.add_argument("--n_loop", type=int, default=16)
+
+    # parser.add_argument("--model_path", type=str, default=None)
+    parser.add_argument("--output_dir", type=str, default="./output")
 
     # parser.add_argument("--curriculum", action="store_true", default=False)
 
@@ -59,13 +62,33 @@ def main():
     os.makedirs("./output", exist_ok=True)
 
     # Task and Dataset
-    task = hoge()
+    from tasks.nc.word import WordProblemDataset, WordProblemTask
 
-    datal_oader, test_loader = task.get_data_loaders()
+    task = WordProblemTask()
+    # dataset = WordProblemDataset()
+    # data_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    train_dataset, test_dataset = WordProblemDataset(task.config, split="train"), WordProblemDataset(
+        task.config, split="test"
+    )
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=task.collate_fn
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=task.collate_fn
+    )
 
     # Model
     if args.model == "Looped":
-        model = LoopedTF(args).cuda()
+        model_args = dict(
+            block_size=task.config["block_size"],
+            vocab_size=task.config["vocab_size"],
+            n_layer=args.n_layer,
+            n_head=args.n_head,
+            n_embd=args.n_embd,
+            dropout=0.0,
+            n_loop=args.n_loop,
+        )
+        model = LoopedTF(model_args).cuda()
     else:
         model = GPT(args).cuda()
 
@@ -75,22 +98,18 @@ def main():
     optimizer, scheduler = set_optimizer_scheduler(model, args)
 
     # set up wandb
-    wandb.init(project="CoT-vs-Loop", config=args, name=ae)
+    wandb.init(project="CoT-vs-Loop", config=args, name=f"{args.task}_{args.input_length}_{args.model}")
 
     for epoch in range(args.epoch):
         model.train()
         # loader.sampler.set_epoch(epoch)
-        for i, (input_ids, y, _) in enumerate(tqdm(data_loader)):
-
-            # ここもタスク依存にしたい
-            # lossをどうやって取るべきか...
+        for i, (input_ids, y, _) in enumerate(tqdm(train_loader)):
             inputs, y = input_ids.cuda(), y.long().cuda()
-            # これはなんだ...
-            if args.model_arch == "Looped":
-                input_mask = (y != 0).cuda()
-                inputs = inputs.masked_fill(~input_mask, 0)
+            # if args.model_arch == "Looped":
+            #    input_mask = (y != 0).cuda()
+            #    inputs = inputs.masked_fill(~input_mask, 0)
             logits = model(inputs)
-            loss = task.criterion(logits.transpose(1, 2), y)
+            loss = task.pointwise_loss_fn(logits, y)
 
             optimizer.zero_grad()
             loss.backward()
@@ -102,8 +121,19 @@ def main():
         scheduler.step()
 
         if (epoch + 1) % (args.epoch // 10) == 0:
-            results = task.evaluate(model, test_loader)
-            wandb.log(results)
+            model.eval()
+            with torch.no_grad():
+                total_acc = 0
+                for i, (input_ids, y, _) in enumerate(tqdm(test_loader)):
+                    inputs, y = input_ids.cuda(), y.long().cuda()
+                    logits = model(inputs)
+                    acc = task.accuracy(logits, y)
+                    total_acc += acc.item()
+                avg_acc = total_acc / len(test_loader)
+                wandb.log({"test_accuracy": avg_acc})
+
+            # results = task.evaluate(model, test_loader)
+            # wandb.log(results)
 
             out_dir = os.path.join(args.output_dir, wandb.run.id)
             os.makedirs(out_dir, exist_ok=True)

@@ -1,4 +1,4 @@
-# To CoT or To Loop?
+# To CoT or to Loop?
 
 This repository provides the official implementation of the experiments in [To CoT or to Loop? A Formal Comparison Between Chain-of-Thought and Looped Transformers](https://arxiv.org/abs/2410.01405).
 
@@ -18,6 +18,21 @@ conda activate nnch
 export PYTHONPATH=$(pwd)/..
 python experiments/train.py
 ```
+
+
+
+## Looped Transfomrers and Parallel Computation
+
+### NC
+- Word Problem
+- Arithmetic Expression (Boolean Citrcuit)
+
+
+### P-complete
+- hoge
+- hoge
+
+
 
 全体のコードの設計
 
@@ -66,6 +81,15 @@ CoTはP-completeの方のみを
 - Arithmetic Expressio (Boolean Citrcuit) TC0で解けない
 
 
+CoTで解けるかどうかに関しては、
+P-completeのコードが適用できるやつ？
+逆行列とかは逐次的なやつの途中を抜く感じでいけるか
+算術もいけるか
+regular CFGもいけるか？動的計画法
+
+少ないステップだと解けなくて、多いステップ数だと解ける的な
+
+
 - perfect_matching (NC2) 本当に解けるのかな？
 
 
@@ -94,3 +118,8 @@ BPP, FPRAS,
 ## Acknowledgement
 - [Towards Revealing the Mystery behind Chain of Thought: a Theoretical Perspective (NeurIPS 2023)](https://github.com/guyuntian/CoT_benchmark)
 - [Neural Networks and the Chomsky Hierarchy (ICLR 2023)](https://github.com/google-deepmind/neural_networks_chomsky_hierarchy/tree/main)
+
+
+The Illusion of State in State-Space Models (https://github.com/jopetty/word-problem)
+
+これはデバッグかな？他に目的あるかな？positional embeddingの重要性が示せたら嬉しいけど、どうかな

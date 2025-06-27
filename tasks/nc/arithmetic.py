@@ -1,5 +1,13 @@
+from tasks.task import GeneralizationTask
 
-class Arithmetic(task.):
+
+class Arithmetic(GeneralizationTask):
+    def pointwise_loss_fn(self, output, target):
+        pass
+
+    def accuracy_fn(self, output, target):
+        pass
+
     def toToken(sentences):
         token_list = list()
         for sentence in sentences:
@@ -11,17 +19,18 @@ class Arithmetic(task.):
 
     def getY(X, chain):
         if not chain:
-            x = torch.where(X==dictionary['='], 1, 0)
+            x = torch.where(X == dictionary["="], 1, 0)
             Y = X[:, 1:] * x[:, :-1]
         else:
             Y = X[:, 1:] * 1
             b = Y.shape[0]
-            equa = torch.argmax(torch.where(Y==dictionary['='], 1, 0), dim=1)
-            eos = torch.argmax(torch.where(Y==dictionary['<eos>'], 1, 0), dim=1)
+            equa = torch.argmax(torch.where(Y == dictionary["="], 1, 0), dim=1)
+            eos = torch.argmax(torch.where(Y == dictionary["<eos>"], 1, 0), dim=1)
             for i in range(b):
-                Y[i, :equa[i] + 1] = 0
-                Y[i, eos[i]+1:] = 0
+                Y[i, : equa[i] + 1] = 0
+                Y[i, eos[i] + 1 :] = 0
         return Y
+
 
 def generateArithmeticData(args, dictionary):
     import random

@@ -1,5 +1,8 @@
 # Reachability
 # PATH = {〈G, s, t〉 : G is a directed graph in which there is a path from s to t}
+# これはnc2か。detだもんな
+# まあこれが解けるのは嬉しいよな...
+# 入力に関係があたえられて...
 
 class Reachability(task.GeneralizationTask):
   """A task with the goal of summing two numbers in binary (little-endian).
