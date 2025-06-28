@@ -130,7 +130,7 @@ class GPT(nn.Module):
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx):  # , targets=None):
         device = idx.device
         b, t = idx.size()
         assert (
@@ -146,16 +146,17 @@ class GPT(nn.Module):
             x = block(x)
         x = self.transformer.ln_f(x)
 
-        if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
-        else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
-            loss = None
+        logits = self.lm_head(x)
+        # if targets is not None:
+        # if we are given some desired targets also calculate the loss
+        # logits = self.lm_head(x)
+        # loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+        # else:
+        # inference-time mini-optimization: only forward the lm_head on the very last position
+        # logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
+        # loss = None
 
-        return logits, loss
+        return logits  # , loss
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
@@ -191,26 +192,50 @@ class LoopedTFConfig(GPTConfig):
     is_causal: bool = False
 
 
+# https://github.com/andreamad8/Universal-Transformer-Pytorch/blob/master/models/common_layer.py#L351
+import numpy as np
+
+
+def _gen_timing_signal(length, channels, min_timescale=1.0, max_timescale=1.0e4):
+    """
+    Generates a [1, length, channels] timing signal consisting of sinusoids
+    Adapted from:
+    https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/layers/common_attention.py
+    """
+    position = np.arange(length)
+    num_timescales = channels // 2
+    log_timescale_increment = math.log(float(max_timescale) / float(min_timescale)) / (float(num_timescales) - 1)
+    inv_timescales = min_timescale * np.exp(np.arange(num_timescales).astype(np.float32) * -log_timescale_increment)
+    scaled_time = np.expand_dims(position, 1) * np.expand_dims(inv_timescales, 0)
+
+    signal = np.concatenate([np.sin(scaled_time), np.cos(scaled_time)], axis=1)
+    signal = np.pad(signal, [[0, 0], [0, channels % 2]], "constant", constant_values=[0.0, 0.0])
+    signal = signal.reshape([1, length, channels])
+
+    return torch.from_numpy(signal).type(torch.FloatTensor)
+
+
 class LoopedTF(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
-        assert config.is_causal is False
+        # assert config.is_causal is False
         self.config = config
+
+        print(config)
 
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.vocab_size, config.n_embd),
-                # `wpe` is a ModuleList of positional embeddings, one for each loop iteration.
-                # In the future, this can be replaced with a single embedding function of both position and loop index,
-                # similar to the approach used in Universal Transformers.
-                wpe=nn.ModuleList([nn.Embedding(config.block_size, config.n_embd) for _ in range(config.n_loop)]),
                 drop=nn.Dropout(config.dropout),
                 h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
                 ln_f=nn.RMSNorm(config.n_embd),
             )
         )
+        self.timing_signal = _gen_timing_signal(config.n_loop, config.n_embd)
+        self.position_signal = _gen_timing_signal(config.block_size, config.n_embd)
+
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.wte.weight = self.lm_head.weight
 
@@ -229,21 +254,17 @@ class LoopedTF(nn.Module):
 
         tok_emb = self.transformer.wte(idx)
         x = self.transformer.drop(tok_emb)
-        for i in range(self.config.n_loop):
-            pos_emb = self.transformer.wpe[i](pos)
-            x = x + pos_emb
+        for step in range(self.config.n_loop):
+            x += self.timing_signal.to(device)[:, step, :]  # add timing signal
+            x += self.position_signal.to(x.device)[:, pos, :]  # add position signal
+
             for block in self.transformer.h:
                 x = block(x)
         x = self.transformer.ln_f(x)
 
-        if targets is not None:
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
-        else:
-            logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
-            loss = None
+        logits = self.lm_head(x)
 
-        return logits, loss
+        return logits
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -253,8 +274,6 @@ class LoopedTF(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def get_num_params(self, non_embedding=True):
+    def get_num_params(self):
         n_params = sum(p.numel() for p in self.parameters())
-        if non_embedding:
-            n_params -= self.transformer.wpe.weight.numel()
         return n_params
