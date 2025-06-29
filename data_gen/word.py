@@ -151,7 +151,7 @@ if __name__ == "__main__":
     parser.add_argument("--samples", type=int, default=None, help="Number of samples")
     # parser.add_argument("--train_size", type=int, default=1e6)
     # parser.add_argument("--test_size", type=int, default=1e4)
-    parser.add_argument("--data_dir", default="data", help="Output directory")
+    parser.add_argument("--data_dir", default="data/word_problem", help="Output directory")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing file")
     args = parser.parse_args()

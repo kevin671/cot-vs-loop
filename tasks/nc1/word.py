@@ -3,12 +3,13 @@ import csv
 import torch
 import torch.nn.functional as F
 
-from tasks.task import GeneralizationTask, CurriculumDataset
+from tasks.task import CurriculumDataset, GeneralizationTask
 
 
 class WordProblemDataset(CurriculumDataset):
     def __init__(self, config, split="train"):
         super().__init__()
+        self.config = config
         csv_path = config["csv_path"]
         if split == "test":
             csv_path = csv_path.replace(".csv", "_test.csv")
@@ -23,12 +24,11 @@ class WordProblemDataset(CurriculumDataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        # TODO: =を追加する
         inp, tgt = self.samples[idx]
         length = self.curriculum.sample_sequence_length() if self.curriculum else len(inp)
         if length < len(inp):
-            inp = inp[:length]
-            tgt = tgt[:length]
+            inp = inp[:length] + [self.config["vocab_size"] - 1]  # padding "=" token
+            tgt = tgt[:length]  # 長さが違うのは注意
         # self.curriculum.step() if self.curriculum else None
         return torch.tensor(inp, dtype=torch.long), torch.tensor(tgt, dtype=torch.long)
 
@@ -75,10 +75,23 @@ class WordProblemTask(GeneralizationTask):
     config = {
         "name": "word_problem",
         "description": "Compute prefix products over a sequence of group elements.",
-        "csv_path": "data/word_problem/S5_512.csv",  # "data/word_problem/S5_512.csv",  # Path to the CSV file with input-output pairs
-        "vocab_size": 120,  # 120,  # Number of unique group elements (IDs)
-        "max_length": 512,  # 512,  # Maximum sequence length
+        "csv_path": "data/word_problem/S5_256.csv",  # "data/word_problem/S5_512.csv",  # Path to the CSV file with input-output pairs
+        "vocab_size": 122,  # 120,  # Number of unique group elements (IDs)
+        "max_length": 257,  # 512,  # Maximum sequence length
+        "ignore_index": -100,
     }
+
+    def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        last_logits = output[:, -1, :]
+        last_target = target[:, -1]
+        loss = F.cross_entropy(last_logits, last_target, ignore_index=-1)
+        return loss
+
+    def accuracy_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        last_logits = output[:, -1, :]  # (B, V)
+        last_target = target[:, -1]  # (B,)
+        pred = last_logits.argmax(dim=-1)  # (B,)
+        return (pred == last_target).float().mean()  # scalar accuracy
 
 
 if __name__ == "__main__":

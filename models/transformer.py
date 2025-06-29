@@ -147,16 +147,7 @@ class GPT(nn.Module):
         x = self.transformer.ln_f(x)
 
         logits = self.lm_head(x)
-        # if targets is not None:
-        # if we are given some desired targets also calculate the loss
-        # logits = self.lm_head(x)
-        # loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
-        # else:
-        # inference-time mini-optimization: only forward the lm_head on the very last position
-        # logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
-        # loss = None
-
-        return logits  # , loss
+        return logits
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
@@ -256,7 +247,7 @@ class LoopedTF(nn.Module):
         x = self.transformer.drop(tok_emb)
         for step in range(self.config.n_loop):
             x += self.timing_signal.to(device)[:, step, :]  # add timing signal
-            x += self.position_signal.to(x.device)[:, pos, :]  # add position signal
+            x += self.position_signal.to(device)[:, pos, :]  # add position signal
 
             for block in self.transformer.h:
                 x = block(x)

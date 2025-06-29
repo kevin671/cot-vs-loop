@@ -47,7 +47,7 @@ def main():
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--epoch", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--warmup", type=int, default=5)
+    parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--weight_decay", type=float, default=0.01)
 
     parser.add_argument("--model", type=str, default="Looped", choices=["Looped", "GPT"])
@@ -55,7 +55,7 @@ def main():
     parser.add_argument("--n_head", type=int, default=4)
     parser.add_argument("--n_layer", type=int, default=2)
     parser.add_argument("--n_loop", type=int, default=16)
-    parser.add_argument("--is_causal", type=bool, default=True)
+    parser.add_argument("--is_causal", action="store_true")
 
     # parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="./output")
@@ -70,39 +70,40 @@ def main():
 
     # Task and Dataset
     from tasks.nc1.word import WordProblemDataset, WordProblemTask
+    from tasks.sharp_p.bayes_net import BayesNetDataset, BayesNetTask
 
-    # TODO: args.input_lengthを引数にするように
-    task = WordProblemTask()
-    train_dataset = WordProblemDataset(task.config, split="train")
-    test_dataset = WordProblemDataset(task.config, split="test")
+    if args.task == "bayes_net":
+        task = BayesNetTask()
+        train_dataset = BayesNetDataset(task.config, split="train")
+        test_dataset = BayesNetDataset(task.config, split="test")
+    elif args.task == "word":
+        # TODO: args.input_lengthを引数にするように
+        task = WordProblemTask()
+        train_dataset = WordProblemDataset(task.config, split="train")
+        test_dataset = WordProblemDataset(task.config, split="test")
+
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
-    from .curriculum import RegularIncreaseCurriculum
-
-    # from .curriculum import GeometricIncreaseCurriculum
+    from .curriculum import GeometricIncreaseCurriculum
 
     max_length = task.config["max_length"]
-    total_steps = len(train_loader) * args.epoch
-    initial_len = 4
-    increase_amount = 2
-    n_increments = math.ceil((max_length - initial_len) / increase_amount) + 1
-    # initial_len = 2
-    # increase_factor = 2
+    # total_steps = len(train_loader) * args.epoch
+    initial_len = 2
+    increase_factor = 2
     # n_increments = math.ceil(math.log2(max_length / initial_len))
-
-    increase_frequency = max(1, total_steps // n_increments)
-    curriculum = RegularIncreaseCurriculum(  # GeometricIncreaseCurriculum(
+    # increase_frequency = max(1, total_steps // n_increments)
+    curriculum = GeometricIncreaseCurriculum(
         initial_sequence_length=initial_len,
-        increase_frequency=increase_frequency,
-        increase_amount=increase_amount,
-        # increase_factor=increase_factor,
+        base_steps=40 * len(train_loader),  # S₀
+        # increase_frequency=increase_frequency,
+        increase_factor=increase_factor,
         sample_all_length=False,
         max_sequence_length=max_length,
         warmup_steps=args.warmup * len(train_loader),
     )
     train_dataset.set_curriculum(curriculum)
-    # test_dataset.set_curriculum(curriculum)
+    test_dataset.set_curriculum(curriculum)
 
     # Model
     if args.model == "Looped":
@@ -131,11 +132,8 @@ def main():
         model.train()
         seq_len = curriculum.sample_sequence_length()
         print(f"Epoch {epoch + 1}/{args.epoch}, Sequence Length: {seq_len}")
-        # loader.sampler.set_epoch(epoch)
         for i, (input_ids, y) in enumerate(tqdm(train_loader)):
             inputs, y = input_ids.cuda(), y.long().cuda()
-            print(inputs, y, flush=True)
-            # seq_len = curriculum.sample_sequence_length()
             logits = model(inputs)
             loss = task.pointwise_loss_fn(logits, y)
 
@@ -146,26 +144,27 @@ def main():
             curriculum.step()  # assume single GPU training
             if i % 100 == 0:
                 lr = optimizer.param_groups[0]["lr"]
+                seq_len = curriculum.sample_sequence_length()
                 wandb.log({"loss": loss.item(), "lr": lr})
+                wandb.log({"input_length": seq_len})
 
         if (epoch + 1) % 10 == 0:
             model.eval()
-            # seq_len = curriculum.sample_sequence_length()
             with torch.no_grad():
-                if args.task == "word":
-                    total_acc = torch.zeros(task.config["max_length"], device="cpu")
-                else:
-                    total_acc = torch.tensor(0.0, device="cpu")
-                # seq_len = curriculum.sample_sequence_length()
-                # print(f"Evaluating at Sequence Length: {seq_len}")
-                # total_acc = torch.tensor(0.0, device="cpu")
+                # if args.task == "word":
+                #    total_acc = torch.zeros(task.config["max_length"], device="cpu")
+                # else:
+                #    total_acc = torch.tensor(0.0, device="cpu")
+                seq_len = curriculum.sample_sequence_length()
+                print(f"Evaluating at Sequence Length: {seq_len}")
+                total_acc = torch.tensor(0.0, device="cpu")
                 for i, (input_ids, y) in enumerate(tqdm(test_loader)):
                     inputs, y = input_ids.cuda(), y.long().cuda()
                     logits = model(inputs)
-                    acc = task.accuracy_fn(logits, y).detach().cpu()
-                    total_acc += acc
-                    # acc = task.accuracy_fn(logits, y)  # .detach().cpu()
-                    # total_acc += acc.item()
+                    # acc = task.accuracy_fn(logits, y).detach().cpu()
+                    # total_acc += acc
+                    acc = task.accuracy_fn(logits, y)  # .detach().cpu()
+                    total_acc += acc.item()
             avg_acc = total_acc / len(test_loader)
             wandb.log({"test_accuracy": avg_acc})
             print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
