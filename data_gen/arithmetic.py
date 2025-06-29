@@ -7,8 +7,8 @@ import numpy as np
 
 parser = argparse.ArgumentParser(description="data")
 
-parser.add_argument("--file", type=str, default="Data")
-parser.add_argument("--length", type=int, default=3)
+parser.add_argument("--file", type=str, default="data")
+parser.add_argument("--length", type=int, default=16)
 parser.add_argument("--train_size", type=float, default=1e6)
 parser.add_argument("--test_size", type=float, default=1e5)
 parser.add_argument("--number_range", type=int, default=11)
@@ -110,67 +110,43 @@ def get(length):
     return ans[:-1]
 
 
-maxlen = 4 * args.length + 1
-maxhistory = 0
-train_set = set()
-if args.under:
-    output_list = np.arange(args.length) + 1
-    output_list = output_list / np.sum(output_list) * args.train_size
-    for i in range(args.length):
-        for _ in range(int(output_list[i])):
-            history = get(i + 1)
-            train_set.add(tuple(history))
-            maxhistory = max(maxhistory, len(history))
-while len(train_set) < args.train_size:
-    history = get(args.length)
-    train_set.add(tuple(history))
-    maxhistory = max(maxhistory, len(history))
+def build_dataset(depth: int, train_size: int, test_size: int, out_dir: str, fname: str = "arithmetic") -> None:
+    os.makedirs(out_dir, exist_ok=True)
+    train_set, test_set = set(), set()
 
-test_set = set()
-while len(test_set) < args.test_size:
-    history = get(args.length)
-    tmp = tuple(history)
-    if tmp not in train_set:
-        test_set.add(tmp)
-    maxhistory = max(maxhistory, len(history))
+    # ---- train ----
+    while len(train_set) < train_size:
+        train_set.add(tuple(get(depth)))
+    # ---- test (train に含まれない物のみ) ----
+    while len(test_set) < test_size:
+        h = tuple(get(depth))
+        if h not in train_set:
+            test_set.add(h)
 
-decoder = f"{args.file}/decoder"
-chain = f"{args.file}/chain"
-os.makedirs(f"{args.file}", exist_ok=True)
-os.makedirs(decoder, exist_ok=True)
-os.makedirs(chain, exist_ok=True)
+    # ---- 書き込み (“最終式 = 答え” だけ) ----
+    def dump(fname, data):
+        with open(os.path.join(out_dir, fname), "w") as f:
+            for hist in data:
+                for tok in hist:  # 最終式～最初の '=' まで出力
+                    print(tok, end=" ", file=f)
+                    if tok == "=":
+                        break
+                print(hist[-1], file=f)  # ラベル（最終値）
 
-with open(f"{decoder}/train_data.txt", "w") as f1:
-    for history in train_set:
-        for i in history:
-            print(i, end=" ", file=f1)
-            if i == "=":
-                break
-        print(history[-1], file=f1)
+    dump("train.txt", train_set)
+    dump("test.txt", test_set)
 
-with open(f"{decoder}/test_data.txt", "w") as f1:
-    for history in test_set:
-        for i in history:
-            print(i, end=" ", file=f1)
-            if i == "=":
-                break
-        print(history[-1], file=f1)
 
-with open(f"{chain}/train_data.txt", "w") as f1:
-    for history in train_set:
-        for i in history:
-            print(i, end=" ", file=f1)
-        print("", file=f1)
+if __name__ == "__main__":
+    base_dir = f"{args.file}/arithmetic"
 
-with open(f"{chain}/test_data.txt", "w") as f1:
-    with open(f"{chain}/test_ans.txt", "w") as f2:
-        for history in test_set:
-            for i in history:
-                print(i, end=" ", file=f1)
-                if i == "=":
-                    break
-            print("", file=f1)
-            print(history[-1], file=f2)
+    if args.under:
+        # 深さ 1‥L をそれぞれ独立ディレクトリへ
+        for d in range(1, args.length + 1):
+            subdir = os.path.join(base_dir, f"len_{d}")
+            build_dataset(d, int(args.train_size), int(args.test_size), subdir)
+    else:
+        # 単一深さ (従来通り)
+        build_dataset(args.length, int(args.train_size), int(args.test_size), base_dir)
 
-print(f"max direct len:{maxlen}")
-print(f"max cot len:{maxhistory}")
+    print(f"Datasets successfully written to: {base_dir}")
