@@ -18,32 +18,43 @@ python experiments/train.py
 
 ## Looped Transfomrers and Parallel Computation
 
-### NC
-
-NC1
+### NC1
 - Word Problem
-- Boolean formula value problem
+- Boolean Formula Value Problem
 
-NC2
+Dataset generation
+```shell
+python data_gen/word.py --group=S5 --k=256 --data_dir=data/word_problem --samples=1000000 --overwrite
+```
+
+### NC2
 - Reachability
 - Linear Equalition
 - Fixed Context-Free-Grammar Membership Testing 
 
 Dataset generation
 ```shell
-python data_gen/word.py --group=S5 --k=512 --samples=1000000 --overwrite
-python data_gen/arithmetic.py --length 512 --train_size 1e6 --test_size 1e5 --number_range 11
+python data_gen/
 ```
 
 ### P-complete
-
 - Circuit Value Problem
 - Linear Equalition
 - Arithmetic Expression
 
+Dataset generation
+```shell
+python data_gen/
+python data_gen/arithmetic.py --length 256 --train_size 1e6 --test_size 1e5 --number_range 11
+```
+
 ### #P
 Approximate inference in Bayesian networks.
 Forward inference by ancestor sampling.
+
+```shell
+python experiments/train.py --task Bayes --model Looped --n_layer 2 --n_loop 8 --epoch 1000
+```
 
 ## Acknowledgement
 - [Towards Revealing the Mystery behind Chain of Thought: a Theoretical Perspective (NeurIPS 2023)](https://github.com/guyuntian/CoT_benchmark)

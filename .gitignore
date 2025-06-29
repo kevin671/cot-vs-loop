@@ -1,5 +1,6 @@
 .venv
 *.sh.*
+*.d*
 __pycache__
 *.bin
 downloads/
