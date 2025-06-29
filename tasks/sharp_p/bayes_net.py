@@ -1,18 +1,3 @@
-# ただのサンプリングだけど、問題を
-# loopedはとりあえずend-to-endでやる
-# chainは確率を計算する必要がある...　これをちゃんと実装できるか。めんどくさいな...
-# なんかサンプリングしてカウントだけで良いか
-# これfprasなのか？
-
-# CoT as chain rules は、まあベイズネットワークのサンプリングの実用的な意味によるか
-# まあある意味でまさに確率的な推論（順を追った）か。これがloopedでループ数を増やしてもできないと非常に面白いな。
-# つまりP-completeな問題が解けてもこれが解けないと言いたい。
-
-# 問題をうまく定義する。与えられたネットワークである必要もないか。決まったネットワーク（事前知識に対して？）
-# 学習は、直接やってしまうとダメだから、あくまで局所的な推論しかできない、何回忘れるんだ...
-
-# サンプリング問題をちゃんと学習・評価する
-
 import itertools
 import os
 import random
@@ -71,7 +56,13 @@ def neighborhood(G: nx.DiGraph, center: int, radius: int):
 
 
 def generate_dataset(
-    G: nx.DiGraph, cpts, num_samples: int, geo_p: float = 0.5, dropout_rate: float = 0.2, max_radius: int = 3, seed=None
+    G: nx.DiGraph,
+    cpts,
+    num_samples: int,
+    geo_p: float = 0.5,
+    dropout_rate: float = 0.2,
+    max_radius: int = 3,
+    seed=None,
 ):
     data = []
     nodes = list(G.nodes())

@@ -123,7 +123,7 @@ def build_dataset(depth: int, train_size: int, test_size: int, out_dir: str, fna
         if h not in train_set:
             test_set.add(h)
 
-    # ---- 書き込み (“最終式 = 答え” だけ) ----
+    # ---- 書き込み ("最終式 = 答え" だけ) ----
     def dump(fname, data):
         with open(os.path.join(out_dir, fname), "w") as f:
             for hist in data:
@@ -141,12 +141,13 @@ if __name__ == "__main__":
     base_dir = f"{args.file}/arithmetic"
 
     if args.under:
-        # 深さ 1‥L をそれぞれ独立ディレクトリへ
-        for d in range(1, args.length + 1):
+        d = 2
+        while d <= args.length:
             subdir = os.path.join(base_dir, f"len_{d}")
             build_dataset(d, int(args.train_size), int(args.test_size), subdir)
+            d *= 2
+            print(f"Dataset for length {d} written to: {subdir}")
     else:
-        # 単一深さ (従来通り)
         build_dataset(args.length, int(args.train_size), int(args.test_size), base_dir)
 
     print(f"Datasets successfully written to: {base_dir}")

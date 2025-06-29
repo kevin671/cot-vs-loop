@@ -1,0 +1,2 @@
+class BooleanFormulaValueProblem:
+    pass
