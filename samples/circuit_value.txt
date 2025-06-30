@@ -1,0 +1,1 @@
+T NA NA 1   F NA NA 2   AND 1 2 3   NOT 3 NA 4   =   TRUE
