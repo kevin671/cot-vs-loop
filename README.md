@@ -21,15 +21,24 @@ python experiments/train.py
 ### NC1
 - Word Problem
 - Boolean Formula Value Problem
+- Arithmetic Expression (?)
 
 Dataset generation
 ```shell
 python data_gen/word.py --group=S5 --k=256 --data_dir=data/word_problem --samples=1000000 --overwrite
+python data_gen/bfvp.py --length 256 --train_size 1000000 --test_size 100000
+python data_gen/arithmetic.py --length 256 --train_size 1000000 --test_size 100000 --number_range 11
 ```
+
+Training
+```shell
+python -m experiments.train --task word --input_length 256 --model Looped --n_layer 2 --n_loop 4 --is_causal --epoch 1000
+```
+use --is_causal only for word problem
 
 ### NC2
 - Reachability
-- Linear Equalition
+- Linear Equalition (nxn?)
 - Fixed Context-Free-Grammar Membership Testing 
 
 Dataset generation
@@ -40,7 +49,6 @@ python data_gen/
 ### P-complete
 - Circuit Value Problem
 - Linear Equalition
-- Arithmetic Expression
 
 Dataset generation
 ```shell

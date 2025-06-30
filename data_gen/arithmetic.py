@@ -114,10 +114,10 @@ def build_dataset(depth: int, train_size: int, test_size: int, out_dir: str, fna
     os.makedirs(out_dir, exist_ok=True)
     train_set, test_set = set(), set()
 
-    # ---- train ----
+    # Train
     while len(train_set) < train_size:
         train_set.add(tuple(get(depth)))
-    # ---- test (train に含まれない物のみ) ----
+    # Test
     while len(test_set) < test_size:
         h = tuple(get(depth))
         if h not in train_set:

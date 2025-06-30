@@ -228,7 +228,7 @@ class LoopedTF(nn.Module):
         self.position_signal = _gen_timing_signal(config.block_size, config.n_embd)
 
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.transformer.wte.weight = self.lm_head.weight
+        # self.transformer.wte.weight = self.lm_head.weight
 
         self.apply(self._init_weights)
         for pn, p in self.named_parameters():

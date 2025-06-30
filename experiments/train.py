@@ -12,9 +12,7 @@ import wandb
 from models.transformer import GPT, LoopedTF, LoopedTFConfig
 
 
-def set_optimizer_scheduler(
-    model, args, dataloader
-) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
+def set_optimizer_scheduler(model, args, dataloader) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
@@ -57,7 +55,7 @@ def main():
     parser.add_argument("--n_loop", type=int, default=16)
     parser.add_argument("--is_causal", action="store_true")
 
-    # parser.add_argument("--model_path", type=str, default=None)
+    parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="./output")
 
     # parser.add_argument("--curriculum", action="store_true", default=False)
@@ -85,25 +83,35 @@ def main():
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
-    from .curriculum import GeometricIncreaseCurriculum
+    from .curriculum import GeometricIncreaseCurriculum, RegularIncreaseCurriculum
 
     max_length = task.config["max_length"]
-    # total_steps = len(train_loader) * args.epoch
-    initial_len = 2
-    increase_factor = 2
-    # n_increments = math.ceil(math.log2(max_length / initial_len))
-    # increase_frequency = max(1, total_steps // n_increments)
-    curriculum = GeometricIncreaseCurriculum(
-        initial_sequence_length=initial_len,
-        base_steps=40 * len(train_loader),  # S₀
-        # increase_frequency=increase_frequency,
-        increase_factor=increase_factor,
-        sample_all_length=False,
-        max_sequence_length=max_length,
-        warmup_steps=args.warmup * len(train_loader),
-    )
+    if args.task == "word":
+        total_steps = len(train_loader) * args.epoch
+        initial_len = 4
+        increase_amount = 2
+        n_increments = math.ceil((max_length - initial_len) / increase_amount) + 1
+        increase_frequency = max(1, total_steps // n_increments)
+        curriculum = RegularIncreaseCurriculum(
+            initial_sequence_length=initial_len,
+            increase_frequency=increase_frequency,
+            increase_amount=increase_amount,
+            sample_all_length=False,
+            max_sequence_length=max_length,
+        )
+    else:
+        initial_len = 2
+        increase_factor = 2
+        curriculum = GeometricIncreaseCurriculum(
+            initial_sequence_length=initial_len,
+            base_steps=40 * len(train_loader),  # S₀
+            increase_factor=increase_factor,
+            sample_all_length=False,
+            max_sequence_length=max_length,
+            warmup_steps=args.warmup * len(train_loader),
+        )
     train_dataset.set_curriculum(curriculum)
-    test_dataset.set_curriculum(curriculum)
+    # test_dataset.set_curriculum(curriculum)
 
     # Model
     if args.model == "Looped":
@@ -121,8 +129,9 @@ def main():
     else:
         model = GPT(args).cuda()
 
-    # if args.model_path:
-    #    model.load_state_dict(torch.load(args.model_path), strict=True)
+    if args.model_path:
+        model.load_state_dict(torch.load(args.model_path), strict=True)
+        print(f"Loaded model from {args.model_path}")
 
     optimizer, scheduler = set_optimizer_scheduler(model, args, train_loader)
 
@@ -151,20 +160,19 @@ def main():
         if (epoch + 1) % 10 == 0:
             model.eval()
             with torch.no_grad():
-                # if args.task == "word":
-                #    total_acc = torch.zeros(task.config["max_length"], device="cpu")
-                # else:
-                #    total_acc = torch.tensor(0.0, device="cpu")
-                seq_len = curriculum.sample_sequence_length()
-                print(f"Evaluating at Sequence Length: {seq_len}")
-                total_acc = torch.tensor(0.0, device="cpu")
+                if args.task == "word":
+                    total_acc = torch.zeros(task.config["max_length"], device="cpu")
+                else:
+                    total_acc = torch.tensor(0.0, device="cpu")
+                # seq_len = curriculum.sample_sequence_length()
+                # print(f"Evaluating at Sequence Length: {seq_len}")
                 for i, (input_ids, y) in enumerate(tqdm(test_loader)):
                     inputs, y = input_ids.cuda(), y.long().cuda()
                     logits = model(inputs)
-                    # acc = task.accuracy_fn(logits, y).detach().cpu()
-                    # total_acc += acc
-                    acc = task.accuracy_fn(logits, y)  # .detach().cpu()
-                    total_acc += acc.item()
+                    acc = task.accuracy_fn(logits, y).detach().cpu()
+                    total_acc += acc
+                    # acc = task.accuracy_fn(logits, y)  # .detach().cpu()
+                    # total_acc += acc.item()
             avg_acc = total_acc / len(test_loader)
             wandb.log({"test_accuracy": avg_acc})
             print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
