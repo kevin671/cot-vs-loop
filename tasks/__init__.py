@@ -1,0 +1,25 @@
+from .nc1.word import WordProblemDataset, WordProblemTask
+from .nc2.path import ReachabilityDataset, ReachabilityTask
+from .p_complete.cvp import CircuitValueProblemDataset, CircuitValueProblemTask
+from .sharp_p.bayes_net import BayesNetOnlineDataset, BayesNetTask
+
+
+def get_task_and_datasets(args):
+    if args.task == "bayes_net":
+        task = BayesNetTask()
+        train_dataset = BayesNetOnlineDataset(task.config, split="train")
+        test_dataset = BayesNetOnlineDataset(task.config, split="test")
+    elif args.task == "word":
+        task = WordProblemTask()
+        train_dataset = WordProblemDataset(task.config, split="train")
+        test_dataset = WordProblemDataset(task.config, split="test")
+    elif args.task == "cvp":
+        task = CircuitValueProblemTask()
+        train_dataset = CircuitValueProblemDataset(task.config, split="train")
+        test_dataset = CircuitValueProblemDataset(task.config, split="test")
+    elif args.task == "path":
+        task = ReachabilityTask()
+        train_dataset = ReachabilityDataset(task.config, split="train")
+        test_dataset = ReachabilityDataset(task.config, split="test")
+
+    return task, train_dataset, test_dataset

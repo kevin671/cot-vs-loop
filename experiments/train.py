@@ -11,6 +11,7 @@ from transformers import get_scheduler, set_seed
 import wandb
 from models.tmlt import TimeModulatedLoopedTF
 from models.transformer import GPT, GPTConfig, LoopedTF, LoopedTFConfig
+from tasks import get_task_and_datasets
 
 
 def set_optimizer_scheduler(
@@ -61,30 +62,13 @@ def main():
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="./output")
 
-    # parser.add_argument("--curriculum", action="store_true", default=False)
-
-    # Option
-    # loop数をカリキュラムに合わせて増やす？
-
     args = parser.parse_args()
 
     seed = 42
     set_seed(seed)
     os.makedirs("./output", exist_ok=True)
 
-    # Task and Dataset
-    from tasks.nc1.word import WordProblemDataset, WordProblemTask
-    from tasks.sharp_p.bayes_net import BayesNetOnlineDataset, BayesNetTask
-
-    if args.task == "bayes_net":
-        task = BayesNetTask()
-        train_dataset = BayesNetOnlineDataset(task.config, split="train")
-        test_dataset = BayesNetOnlineDataset(task.config, split="test")
-    elif args.task == "word":
-        # TODO: args.input_lengthを引数にするように
-        task = WordProblemTask()
-        train_dataset = WordProblemDataset(task.config, split="train")
-        test_dataset = WordProblemDataset(task.config, split="test")
+    task, train_dataset, test_dataset = get_task_and_datasets(args)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)

@@ -20,11 +20,13 @@ python experiments/train.py
 
 ### NC1
 - Word Problem
+- Boolean Formula
 - Arithmetic Expression
 
 Dataset generation
 ```shell
 python gen_data/word.py --group=S5 --k=256 --data_dir=data/word_problem --samples=1000000 --overwrite
+python gen_data/bfvp.py --length 16 --train_size 10 --test_size 10
 python gen_data/arithmetic.py --length 256 --train_size 1000000 --test_size 100000 --number_range 11
 ```
 
@@ -36,7 +38,6 @@ use --is_causal only for word problem
 
 ### NC2
 - Reachability
-- Linear Equalition
 - Fixed Context-Free-Grammar Membership Testing 
 
 Dataset generation
@@ -46,7 +47,10 @@ python gen_data/path.py --num_nodes 8 --train_size 1000000 --test_size 1000 --da
 
 Training
 ```shell
-python -m experiments.train --task path --input_length 8 --model Looped --n_layer 2 --n_loop 8 --is_causal --epoch 1000
+python -m experiments.train --task path --input_length 8 --model Looped --n_layer 2 --n_loop 8 --epoch 1000
+
+# CFGの方はcausalでも良いのかな？いやアルゴリズム的にだめな可能性も
+python -m experiments.train --task path --input_length 8 --model Looped --n_layer 2 --is_causal--n_loop 8 --epoch 1000  
 ```
 
 ### P-complete
@@ -55,10 +59,11 @@ python -m experiments.train --task path --input_length 8 --model Looped --n_laye
 Dataset generation
 ```shell
 python gen_data/cvp.py --num_nodes 64 --train_size 1000000 --test_size 10000 --data_dir data/cvp --seed 42
-python -m experiments.train --task cvp
+python -m experiments.train --task cvp --input_length 64 --model Looped --n_layer 2 --n_loop 64 --is_causal --epoch 1000
 ```
 
 ### #P
+- Bayesian ?
 Approximate inference in Bayesian networks.
 Forward inference by ancestor sampling.
 
