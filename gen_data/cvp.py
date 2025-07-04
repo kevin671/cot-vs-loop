@@ -1,12 +1,15 @@
-# cvp_dataset.py
+import argparse
+import csv
 import random
+from pathlib import Path
 from typing import List, Tuple
 
 GATE_TYPES = ["AND", "OR", "NOT"]
 CONST_TYPES = ["TRUE", "FALSE"]
+PAD_TOKEN = "NA"  # placeholder in the *output* side as well
 
 
-def _gate_value(gtype: str, a: int, b: int) -> int:
+def gate_value(gtype: str, a: int, b: int) -> int:
     if gtype == "TRUE":
         return 1
     if gtype == "FALSE":
@@ -17,73 +20,98 @@ def _gate_value(gtype: str, a: int, b: int) -> int:
         return a & b
     if gtype == "OR":
         return a | b
-    raise ValueError(f"Unknown gate type {gtype}")
+    raise ValueError(f"unknown gate type {gtype}")
 
 
 def generate_circuit(
-    m: int, p_const: float = 0.2, p_not: float = 0.2, seed: int | None = None
-) -> Tuple[List[str], int]:
+    m: int,
+    p_const: float,
+    p_not: float,
+    rng: random.Random,
+) -> Tuple[List[str], List[int]]:
     """
-    1 ≦ m : ゲート数（トポロジカル順に 1…m）
-    戻り値:
-        tokens … 生成されたトークン列 (末尾に '=' を含む)
-        label  … 最終ゲート m の値 (0/1)
+    Return the input-side tokens and a list of gate values.
     """
-    if seed is not None:
-        random.seed(seed)
-
-    gate_vals: List[int] = [None] * (m + 1)  # 1-indexed
-    tokens: list[str] = []
+    values: List[int] = [None] * (m + 1)  # 1-indexed
+    tokens: List[str] = []
 
     for gid in range(1, m + 1):
-        # ゲートタイプを決定
-        if gid <= 2 or random.random() < p_const:  # 最初は必ず定数にして安定化
-            gtype = random.choice(CONST_TYPES)
+        # choose gate type
+        if gid <= 2 or rng.random() < p_const:
+            gtype = rng.choice(CONST_TYPES)
         else:
-            if random.random() < p_not:
-                gtype = "NOT"
-            else:
-                gtype = random.choice(["AND", "OR"])
+            gtype = "NOT" if rng.random() < p_not else rng.choice(["AND", "OR"])
 
-        # 入力ゲートと値の決定
+        # choose inputs
         if gtype in CONST_TYPES:
-            in1_id = in2_id = "NA"
-            val = _gate_value(gtype, 0, 0)
+            in1, in2 = PAD_TOKEN, PAD_TOKEN
+            val = gate_value(gtype, 0, 0)
         elif gtype == "NOT":
-            src = random.randrange(1, gid)  # 既に確定しているゲート
-            in1_id, in2_id = src, "NA"
-            val = _gate_value(gtype, gate_vals[src], 0)
+            src = rng.randrange(1, gid)
+            in1, in2 = src, PAD_TOKEN
+            val = gate_value(gtype, values[src], 0)
         else:  # AND / OR
-            a = random.randrange(1, gid)
-            b = random.randrange(1, gid)
-            in1_id, in2_id = a, b
-            val = _gate_value(gtype, gate_vals[a], gate_vals[b])
+            a = rng.randrange(1, gid)
+            b = rng.randrange(1, gid)
+            in1, in2 = a, b
+            val = gate_value(gtype, values[a], values[b])
 
-        gate_vals[gid] = val
-        tokens.extend([gtype, str(in1_id), str(in2_id), str(gid)])
+        values[gid] = val
+        tokens.extend([gtype, str(in1), str(in2), str(gid)])
 
-    tokens.append("=")
-    return tokens, gate_vals[m]
+    return tokens, values[1:]  # drop dummy index 0
 
 
-def write_dataset(n_samples: int, m_min: int, m_max: int, path: str, seed: int | None = None) -> None:
+def make_output_tokens(values: List[int]) -> List[str]:
     """
-    `path` にタブ区切りで
-        <input_tokens_str>\t<label>
-    を n_samples 行書き出す．
+    Convert gate values [v1, …, vm] to
+    [NA NA NA token(v1), …, NA NA NA token(vm), '=']
     """
-    if seed is not None:
-        random.seed(seed)
+    out: List[str] = []
+    for v in values:
+        token = "TRUE" if v else "FALSE"
+        out.extend([PAD_TOKEN, PAD_TOKEN, PAD_TOKEN, token])
+    return out
 
-    with open(path, "w") as f:
+
+def write_split(
+    n_samples: int,
+    m: int,
+    out_file: Path,
+    rng: random.Random,
+    p_const: float = 0.2,
+    p_not: float = 0.2,
+) -> None:
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    with out_file.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["input", "output"])
         for _ in range(n_samples):
-            m = random.randint(m_min, m_max)
-            tokens, label = generate_circuit(m)
-            line = " ".join(tokens) + f"\t{label}\n"
-            f.write(line)
+            inp_tokens, gate_vals = generate_circuit(m, p_const, p_not, rng)
+            out_tokens = make_output_tokens(gate_vals)
+            w.writerow([" ".join(inp_tokens), " ".join(out_tokens)])
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--num_nodes", type=int, default=32, help="Fixed number of gates per circuit")
+    parser.add_argument("--train_size", type=int, default=int(1e6))
+    parser.add_argument("--test_size", type=int, default=int(1e4))
+    parser.add_argument("--data_dir", type=str, default="data/cvp")
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+
+    rng = random.Random(args.seed)
+    data_dir = Path(args.data_dir)
+    num_nodes = args.num_nodes
+
+    write_split(args.train_size, num_nodes, data_dir / "train.csv", rng)
+    write_split(args.test_size, num_nodes, data_dir / "test.csv", rng)
+
+    print(
+        f"Done. Seq-to-seq datasets with {num_nodes} nodes saved to " f"{data_dir}/train.csv and {data_dir}/test.csv"
+    )
 
 
 if __name__ == "__main__":
-    # 例: トレーニング用 1e6 サンプル, テスト用 1e4 サンプル
-    write_dataset(1_0, 4, 32, "cvp_train.txt", seed=42)
-    write_dataset(10, 4, 32, "cvp_test.txt", seed=123)
+    main()
