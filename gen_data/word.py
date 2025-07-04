@@ -144,7 +144,7 @@ def generate_group(g):
 
 
 if __name__ == "__main__":
-    # python data_gen/word.py --group=S5 --k=512 --data_dir=data/word_problem --samples=1000000 --overwrite
+    # python gen_data/word.py --group=S5 --k=512 --data_dir=data/word_problem --samples=1000000 --overwrite
     parser = argparse.ArgumentParser()
     parser.add_argument("--group", required=True, help="Group identifier, e.g., S3 or A5_x_Z2")
     parser.add_argument("--k", type=int, default=10, help="Sequence length")

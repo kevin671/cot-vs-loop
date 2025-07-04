@@ -1,7 +1,9 @@
-from .transformer import LoopedTF, SelfAttention, MLP
 import math
+
 import torch
 import torch.nn as nn
+
+from .transformer import MLP, LoopedTF, SelfAttention
 
 
 def modulate(x, shift, scale):
@@ -12,9 +14,9 @@ def modulate(x, shift, scale):
 class DiTBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.norm1 = (nn.RMSNorm(config.n_embd, elementwise_affine=False),)
+        self.norm1 = nn.RMSNorm(config.n_embd, elementwise_affine=False)
         self.attn = SelfAttention(config)
-        self.norm2 = (nn.RMSNorm(config.n_embd, elementwise_affine=False),)
+        self.norm2 = nn.RMSNorm(config.n_embd, elementwise_affine=False)
         self.mlp = MLP(config)
         self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(config.n_embd, 6 * config.n_embd, bias=True))
 
@@ -25,7 +27,7 @@ class DiTBlock(nn.Module):
         return x
 
 
-class TimeModulatedLoopedTF(LoopedTF):
+class TimeModulatedLoopedTF(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.vocab_size is not None
@@ -75,6 +77,18 @@ class TimeModulatedLoopedTF(LoopedTF):
         logits = self.lm_head(x)
 
         return logits
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def get_num_params(self):
+        n_params = sum(p.numel() for p in self.parameters())
+        return n_params
 
 
 # https://github.com/facebookresearch/DiT/blob/main/models.py#L27

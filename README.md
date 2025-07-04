@@ -20,52 +20,57 @@ python experiments/train.py
 
 ### NC1
 - Word Problem
-- Boolean Formula Value Problem
-- Arithmetic Expression (?)
+- Arithmetic Expression
 
 Dataset generation
 ```shell
-python data_gen/word.py --group=S5 --k=256 --data_dir=data/word_problem --samples=1000000 --overwrite
-python data_gen/bfvp.py --length 256 --train_size 1000000 --test_size 100000
-python data_gen/arithmetic.py --length 256 --train_size 1000000 --test_size 100000 --number_range 11
+python gen_data/word.py --group=S5 --k=256 --data_dir=data/word_problem --samples=1000000 --overwrite
+python gen_data/arithmetic.py --length 256 --train_size 1000000 --test_size 100000 --number_range 11
 ```
 
 Training
 ```shell
-python -m experiments.train --task word --input_length 256 --model Looped --n_layer 2 --n_loop 4 --is_causal --epoch 1000
+python -m experiments.train --task word --input_length 256 --model Looped --n_layer 2 --n_loop 8 --is_causal --epoch 1000
 ```
 use --is_causal only for word problem
 
 ### NC2
 - Reachability
-- Linear Equalition (nxn?)
+- Linear Equalition
 - Fixed Context-Free-Grammar Membership Testing 
 
 Dataset generation
 ```shell
-python data_gen/
+python gen_data/path.py --num_nodes 8 --train_size 1000000 --test_size 1000 --data_dir data/path --seed 42
+```
+
+Training
+```shell
+python -m experiments.train --task path --input_length 8 --model Looped --n_layer 2 --n_loop 8 --is_causal --epoch 1000
 ```
 
 ### P-complete
 - Circuit Value Problem
-- Linear Equalition
 
 Dataset generation
 ```shell
-python data_gen/
-python data_gen/arithmetic.py --length 256 --train_size 1e6 --test_size 1e5 --number_range 11
+python gen_data/cvp.py --num_nodes 64 --train_size 1000000 --test_size 10000 --data_dir data/cvp --seed 42
+python -m experiments.train --task cvp
 ```
 
 ### #P
 Approximate inference in Bayesian networks.
 Forward inference by ancestor sampling.
 
+vs. Fixed Circuit Value Problem?
+
 ```shell
-python experiments/train.py --task Bayes --model Looped --n_layer 2 --n_loop 8 --epoch 1000
+python gen_data/bayes_net.py
+python experiments/train.py --task bayes_net --model GPT --n_embd 256 --n_head 4 --n_layer 2 --epoch 1000 
 ```
 
-## Acknowledgement
+## Acknowledgeme
 - [Towards Revealing the Mystery behind Chain of Thought: a Theoretical Perspective (NeurIPS 2023)](https://github.com/guyuntian/CoT_benchmark)
-- [Why think step by step? Reasoning emerges from the locality of experience ((NeurIPS 2023))](https://github.com/benpry/why-think-step-by-step)
+- [Why think step by step? Reasoning emerges from the locality of experience (NeurIPS 2023)](https://github.com/benpry/why-think-step-by-step)
 - [Neural Networks and the Chomsky Hierarchy (ICLR 2023)](https://github.com/google-deepmind/neural_networks_chomsky_hierarchy/tree/main)
 - [The Illusion of State in State-Space Models (ICML 2024)](https://github.com/jopetty/word-problem)

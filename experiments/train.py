@@ -9,10 +9,13 @@ from tqdm import tqdm
 from transformers import get_scheduler, set_seed
 
 import wandb
-from models.transformer import GPT, LoopedTF, LoopedTFConfig
+from models.tmlt import TimeModulatedLoopedTF
+from models.transformer import GPT, GPTConfig, LoopedTF, LoopedTFConfig
 
 
-def set_optimizer_scheduler(model, args, dataloader) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
+def set_optimizer_scheduler(
+    model, args, dataloader
+) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
@@ -48,9 +51,9 @@ def main():
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--weight_decay", type=float, default=0.01)
 
-    parser.add_argument("--model", type=str, default="Looped", choices=["Looped", "GPT"])
-    parser.add_argument("--n_embd", type=int, default=256)
-    parser.add_argument("--n_head", type=int, default=4)
+    parser.add_argument("--model", type=str, default="Looped", choices=["Looped", "GPT", "TMLT"])
+    parser.add_argument("--n_embd", type=int, default=512)
+    parser.add_argument("--n_head", type=int, default=8)
     parser.add_argument("--n_layer", type=int, default=2)
     parser.add_argument("--n_loop", type=int, default=16)
     parser.add_argument("--is_causal", action="store_true")
@@ -60,6 +63,9 @@ def main():
 
     # parser.add_argument("--curriculum", action="store_true", default=False)
 
+    # Option
+    # loop数をカリキュラムに合わせて増やす？
+
     args = parser.parse_args()
 
     seed = 42
@@ -68,12 +74,12 @@ def main():
 
     # Task and Dataset
     from tasks.nc1.word import WordProblemDataset, WordProblemTask
-    from tasks.sharp_p.bayes_net import BayesNetDataset, BayesNetTask
+    from tasks.sharp_p.bayes_net import BayesNetOnlineDataset, BayesNetTask
 
     if args.task == "bayes_net":
         task = BayesNetTask()
-        train_dataset = BayesNetDataset(task.config, split="train")
-        test_dataset = BayesNetDataset(task.config, split="test")
+        train_dataset = BayesNetOnlineDataset(task.config, split="train")
+        test_dataset = BayesNetOnlineDataset(task.config, split="test")
     elif args.task == "word":
         # TODO: args.input_lengthを引数にするように
         task = WordProblemTask()
@@ -85,7 +91,8 @@ def main():
 
     from .curriculum import GeometricIncreaseCurriculum, RegularIncreaseCurriculum
 
-    max_length = task.config["max_length"]
+    max_length = args.input_length
+    # max_length = task.config["max_length"]
     if args.task == "word":
         total_steps = len(train_loader) * args.epoch
         initial_len = 4
@@ -126,7 +133,28 @@ def main():
             is_causal=args.is_causal,
         )
         model = LoopedTF(model_args).cuda()
+    elif args.model == "TMLT":
+        model_args = LoopedTFConfig(
+            block_size=task.config["max_length"],
+            vocab_size=task.config["vocab_size"],
+            n_layer=args.n_layer,
+            n_head=args.n_head,
+            n_embd=args.n_embd,
+            dropout=0.0,
+            n_loop=args.n_loop,
+            is_causal=args.is_causal,
+        )
+        model = TimeModulatedLoopedTF(model_args).cuda()
     else:
+        model_args = GPTConfig(
+            block_size=task.config["max_length"],
+            vocab_size=task.config["vocab_size"],
+            n_layer=args.n_layer,
+            n_head=args.n_head,
+            n_embd=args.n_embd,
+            dropout=0.0,
+            # is_causal=args.is_causal,
+        )
         model = GPT(args).cuda()
 
     if args.model_path:
