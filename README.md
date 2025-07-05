@@ -23,11 +23,18 @@ python experiments/train.py
 - Boolean Formula
 - Arithmetic Expression
 
+Word problemsは
+n = 256まで (16, 32, 64, 128, 256)
+ループ数は32とかまでで十分かな？
+
+Boolean formulaは n=64まで
+ループ数は16くらいで解けてほしい？
+
 Dataset generation
 ```shell
 python gen_data/word.py --group=S5 --k=256 --data_dir=data/word_problem --samples=1000000 --overwrite
-python gen_data/bfvp.py --length 16 --train_size 10 --test_size 10
-python gen_data/arithmetic.py --length 256 --train_size 1000000 --test_size 100000 --number_range 11
+python gen_data/bfvp.py --max_depth 64 --data_dir=data/bfvp --train_size 1000000 --test_size 1000
+python gen_data/arithmetic.py --max_depth 64 --train_size 1000000 --test_size 1000 --number_range 11 --under
 ```
 
 Training
@@ -39,6 +46,11 @@ use --is_causal only for word problem
 ### NC2
 - Reachability
 - Fixed Context-Free-Grammar Membership Testing 
+
+n = 4, 8, 16, 32, 64くらいでよいかな？
+ループ数が4, 9, 16, 25, 36的な感じで増えるといいけど
+カリキュラムありなら n = 64までいけるかな？
+
 
 Dataset generation
 ```shell
@@ -69,12 +81,16 @@ Forward inference by ancestor sampling.
 
 vs. Fixed Circuit Value Problem?
 
+これはP-completeなのか？まあとにかくLoopedで解けることを確認して、それと全く同じ学習方法で解けないことが言えれば
+
+あとCoTで解けることをちゃんと確認する
+
 ```shell
 python gen_data/bayes_net.py
 python experiments/train.py --task bayes_net --model GPT --n_embd 256 --n_head 4 --n_layer 2 --epoch 1000 
 ```
 
-## Acknowledgeme
+## Acknowledgement
 - [Towards Revealing the Mystery behind Chain of Thought: a Theoretical Perspective (NeurIPS 2023)](https://github.com/guyuntian/CoT_benchmark)
 - [Why think step by step? Reasoning emerges from the locality of experience (NeurIPS 2023)](https://github.com/benpry/why-think-step-by-step)
 - [Neural Networks and the Chomsky Hierarchy (ICLR 2023)](https://github.com/google-deepmind/neural_networks_chomsky_hierarchy/tree/main)

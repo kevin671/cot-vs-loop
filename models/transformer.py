@@ -22,7 +22,7 @@ class SelfAttention(nn.Module):
         self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
         assert self.flash == True, "Flash attention requires PyTorch 2.0 or later"
 
-    def forward(self, x, key_padding_mask=None):
+    def forward(self, x, attn_mask=None):
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
 
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
@@ -34,7 +34,7 @@ class SelfAttention(nn.Module):
             q,
             k,
             v,
-            attn_mask=key_padding_mask,
+            attn_mask=attn_mask,
             dropout_p=self.dropout if self.training else 0,
             is_causal=self.is_causal,
         )
@@ -69,8 +69,8 @@ class Block(nn.Module):
         self.ln_2 = nn.RMSNorm(config.n_embd)
         self.mlp = MLP(config)
 
-    def forward(self, x, key_padding_mask=None):
-        x = x + self.attn(self.ln_1(x), key_padding_mask=key_padding_mask)
+    def forward(self, x, attn_mask=None):
+        x = x + self.attn(self.ln_1(x), attn_mask=attn_mask)
         x = x + self.mlp(self.ln_2(x))
         return x
 
@@ -217,10 +217,10 @@ class LoopedTF(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         # assert config.is_causal is False
-        # if config.is_causal is False, we use key_padding_mask to prevent attention to pad tokens
+        # if config.is_causal is False, we use attn_mask to prevent attention to pad tokens
         self.pad_token_id = 0
         if config.is_causal is False:
-            print("Warning: LoopedTF is not causal, using key_padding_mask for padding tokens.")
+            print("Warning: LoopedTF is not causal, using attn_mask for padding tokens.")
 
         self.config = config
 
@@ -254,10 +254,10 @@ class LoopedTF(nn.Module):
 
         if self.config.is_causal:
             # causal mask: no attention to future tokens
-            key_padding_mask = None
+            attn_mask = None
         else:
-            key_padding_mask = idx == self.pad_token_id  # shape (b, t)
-            key_padding_mask = key_padding_mask[:, None, None, :].to(device)
+            attn_mask = idx != self.pad_token_id  # shape (b, t)
+            attn_mask = attn_mask[:, None, None, :].to(device)
 
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
 
@@ -268,7 +268,7 @@ class LoopedTF(nn.Module):
             x += self.position_signal.to(device)[:, pos, :]  # add position signal
 
             for block in self.transformer.h:
-                x = block(x, key_padding_mask)
+                x = block(x, attn_mask)
         x = self.transformer.ln_f(x)
 
         logits = self.lm_head(x)

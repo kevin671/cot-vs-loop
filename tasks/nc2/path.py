@@ -1,31 +1,14 @@
-# file: tasks/reachability.py
-import csv
-from collections import defaultdict
-
-# tasks/reachability.py
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset
+from torch.nn.utils.rnn import pad_sequence
 
 from tasks.task import CurriculumDataset, GeneralizationTask
 
 
 class ReachabilityDataset(CurriculumDataset):
-    """
-    One-line format (tab separated):
-
-        vertices                     edges                   query  label
-        v0 v1 v2 v3 v4 v5 v6 v7      0,1 0,3 0,5 1,4 … 4,5   1,4    1
-
-    Returned input sequence:
-        [query_token] + vertex_tokens + edge_tokens
-    Returned label:
-        0 if t is NOT reachable from s, otherwise 1.
-    """
-
     def __init__(self, config, split="train") -> None:
         super().__init__()
         self.config = config
@@ -61,17 +44,10 @@ class ReachabilityDataset(CurriculumDataset):
 
     def __getitem__(self, idx: int):
         ids, label = self.samples[idx]
-        return (
-            torch.tensor(ids, dtype=torch.long),  # 1-D token id tensor
-            torch.tensor(label, dtype=torch.long),  # scalar label tensor
-        )
+        return torch.tensor(ids, dtype=torch.long), torch.tensor(label, dtype=torch.long)
 
 
 class ReachabilityTask(GeneralizationTask):
-    """
-    Binary classification: 1 iff t is reachable from s in the serialized graph.
-    """
-
     max_n = 8
     config = {
         "name": "reachability",
@@ -79,7 +55,7 @@ class ReachabilityTask(GeneralizationTask):
         "data_dir": "data/path",
         "max_node": max_n,
         "vocab_size": max_n + max_n * (max_n - 1) + 1 + 2,  # nodes + edges + <pad> + labels
-        # "max_length": max_n + max_n * (max_n - 1) + 2,  # nodes + edges + <pad> + labels
+        "max_length": max_n + max_n * (max_n - 1) + 2,  # nodes + edges + <pad> + labels
     }
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -89,6 +65,14 @@ class ReachabilityTask(GeneralizationTask):
     def accuracy_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         pred = output[:, 0, :].argmax(dim=-1)  # (batch_size,)
         return (pred == target).float().mean()
+
+    @staticmethod
+    def collate_fn(batch):
+        PAD_ID = 0
+        seqs, labels = zip(*batch)
+        padded = pad_sequence(seqs, batch_first=True, padding_value=PAD_ID)  # (B, L_max)
+        labels = torch.stack(labels)
+        return padded, labels
 
 
 if __name__ == "__main__":

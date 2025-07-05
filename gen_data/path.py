@@ -8,31 +8,17 @@ import tqdm
 
 def encode_graph_for_transformer(G: nx.Graph, s: int, t: int):
     """
-    From an undirected graph **G** and a query pair **(s, t)**,
-    return
-
-      • **tokens** – a list of string tokens that describe the graph
-      • **reachable** – a Boolean indicating whether *t* is reachable from *s*
-
-    Token format
-    ------------
+    Encode the graph *G* for a transformer model as a sequence of tokens.
     The sequence is concatenated in the following order:
 
         [ 'v1', 'v2', ...,          # vertex tokens
           '1,2', '2,3', ...,        # edge tokens (only pairs with u < v)
           's,t' ]                   # query-task token
     """
-    # Vertex tokens – sorted and written as 'v{index}'
     vertices = sorted(G.nodes())
     vertex_tokens = [f"v{v}" for v in vertices]
-
-    # Edge tokens – treat the graph as undirected and keep only u < v
     edge_tokens = [f"{u},{v}" for u, v in sorted(G.edges())]
-
-    # Task-specific token for the reachability query
     task_token = f"{s},{t}"
-
-    # Ground-truth label: is there an s-to-t path?
     reachable = nx.has_path(G, s, t)
 
     tokens = vertex_tokens + edge_tokens + [task_token]
@@ -43,9 +29,6 @@ def generate_er_reachability_sample(n: int, p: float, seed: int = None):
     """
     Draw a random graph **G(n,p)**, pick a random source/target pair,
     and produce one training example consisting of
-
-      • **tokens** – the token sequence described above
-      • **label**  – 1 if *t* is reachable from *s*, else 0
     """
     if seed is not None:
         random.seed(seed)
@@ -60,12 +43,6 @@ def generate_er_reachability_sample(n: int, p: float, seed: int = None):
 def write_sample(path: str, vertices: list[str], edges: list[str], query: str, label: int):
     """
     Append a single line of tab-separated data to *path*:
-
-        vertices (space-separated) ⭾ edges (space-separated) ⭾ query ⭾ label
-
-    Example line
-    ------------
-    ``v0 v1 v2    0,1 1,2    0,2    1``
     """
     line = " ".join(vertices) + "\t" + " ".join(edges) + "\t" + query + "\t" + str(label) + "\n"
     with open(path, "a") as f:
@@ -87,7 +64,7 @@ def main() -> None:
         args.edge_prob = 1.7 / args.num_nodes
 
     rng = random.Random(args.seed)
-    dpath = Path(args.data_dir)
+    dpath = Path(args.data_dir, str(args.num_nodes))
     dpath.mkdir(parents=True, exist_ok=True)
 
     for split, size in [("train", args.train_size), ("test", args.test_size)]:
@@ -108,11 +85,7 @@ def main() -> None:
 
             write_sample(out_file, vertices, edges, query, label)
 
-    print(
-        f"Done!  Files written under “{dpath}”.\n"
-        f"  • train.txt : {args.train_size:,} lines\n"
-        f"  • test.txt  : {args.test_size:,} lines"
-    )
+    print(f"Dataset written to {dpath}")
 
 
 if __name__ == "__main__":

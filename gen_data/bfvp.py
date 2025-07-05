@@ -76,13 +76,19 @@ def build_dataset(depth, train_size, test_size, out_dir):
 
 
 if __name__ == "__main__":
+    import math
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--file", type=str, default="data")
-    parser.add_argument("--length", type=int, default=16)
+    parser.add_argument("--data_dir", type=str, default="data/bfvp")
+    # parser.add_argument("--depth", type=int, default=16)  # depth of the formula
+    parser.add_argument("--max_depth", type=int, default=64)  # max depth of the formula
     parser.add_argument("--train_size", type=int, default=100000)
     parser.add_argument("--test_size", type=int, default=10000)
     args = parser.parse_args()
     random.seed(2023)
-    base = os.path.join(args.file, "boolean_formula")
-    build_dataset(args.length, args.train_size, args.test_size, base)
-    print(f"Written boolean formula-with-negation datasets to {base}")
+
+    depths = [2**i for i in range(1, int(math.log2(args.max_depth)) + 1)]
+    for d in depths:
+        base = os.path.join(args.data_dir, str(d))
+        build_dataset(d, args.train_size, args.test_size, base)
+        print(f"Generated data for depth {d} at {base}")

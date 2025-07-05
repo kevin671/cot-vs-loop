@@ -7,8 +7,8 @@ import numpy as np
 
 parser = argparse.ArgumentParser(description="data")
 
-parser.add_argument("--file", type=str, default="data")
-parser.add_argument("--length", type=int, default=16)
+parser.add_argument("--data_dir", type=str, default="data/arithmetic")
+parser.add_argument("--max_depth", type=int, default=16)
 parser.add_argument("--train_size", type=float, default=1e6)
 parser.add_argument("--test_size", type=float, default=1e5)
 parser.add_argument("--number_range", type=int, default=11)
@@ -138,16 +138,15 @@ def build_dataset(depth: int, train_size: int, test_size: int, out_dir: str, fna
 
 
 if __name__ == "__main__":
-    base_dir = f"{args.file}/arithmetic"
-
+    base_dir = args.data_dir
     if args.under:
         d = 2
-        while d <= args.length:
-            subdir = os.path.join(base_dir, f"len_{d}")
+        while d <= args.max_depth:
+            subdir = os.path.join(base_dir, str(d))
             build_dataset(d, int(args.train_size), int(args.test_size), subdir)
-            d *= 2
             print(f"Dataset for length {d} written to: {subdir}")
+            d *= 2
     else:
-        build_dataset(args.length, int(args.train_size), int(args.test_size), base_dir)
+        build_dataset(args.max_depth, int(args.train_size), int(args.test_size), base_dir)
 
     print(f"Datasets successfully written to: {base_dir}")

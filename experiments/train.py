@@ -3,41 +3,14 @@ import math
 import os
 
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from tqdm import tqdm
-from transformers import get_scheduler, set_seed
+from transformers import set_seed
 
 import wandb
-from models.tmlt import TimeModulatedLoopedTF
-from models.transformer import GPT, GPTConfig, LoopedTF, LoopedTFConfig
+from models import build_model
 from tasks import get_task_and_datasets
 
-
-def set_optimizer_scheduler(
-    model, args, dataloader
-) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
-    no_decay = ["bias", "LayerNorm.weight"]
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-            "weight_decay": args.weight_decay,
-            "lr": args.learning_rate,
-        },
-        {
-            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-            "weight_decay": 0.0,
-            "lr": args.learning_rate,
-        },
-    ]
-    optimizer = optim.AdamW(optimizer_grouped_parameters)
-    scheduler = get_scheduler(
-        name="linear",
-        optimizer=optimizer,
-        num_warmup_steps=len(dataloader) * args.warmup,
-        num_training_steps=len(dataloader) * args.epoch,
-    )
-    return optimizer, scheduler
+from .utils import set_optimizer_scheduler
 
 
 def main():
@@ -63,6 +36,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default="./output")
 
     args = parser.parse_args()
+    print(args)
 
     seed = 42
     set_seed(seed)
@@ -70,14 +44,19 @@ def main():
 
     task, train_dataset, test_dataset = get_task_and_datasets(args)
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+    collate_fn = getattr(task, "collate_fn", None)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn
+    )
 
     from .curriculum import GeometricIncreaseCurriculum, RegularIncreaseCurriculum
 
     max_length = args.input_length
     # max_length = task.config["max_length"]
-    if args.task == "word":
+    if args.task == "word" or args.task == "cvp":
         total_steps = len(train_loader) * args.epoch
         initial_len = 4
         increase_amount = 2
@@ -105,41 +84,8 @@ def main():
     # test_dataset.set_curriculum(curriculum)
 
     # Model
-    if args.model == "Looped":
-        model_args = LoopedTFConfig(
-            block_size=task.config["max_length"],
-            vocab_size=task.config["vocab_size"],
-            n_layer=args.n_layer,
-            n_head=args.n_head,
-            n_embd=args.n_embd,
-            dropout=0.0,
-            n_loop=args.n_loop,
-            is_causal=args.is_causal,
-        )
-        model = LoopedTF(model_args).cuda()
-    elif args.model == "TMLT":
-        model_args = LoopedTFConfig(
-            block_size=task.config["max_length"],
-            vocab_size=task.config["vocab_size"],
-            n_layer=args.n_layer,
-            n_head=args.n_head,
-            n_embd=args.n_embd,
-            dropout=0.0,
-            n_loop=args.n_loop,
-            is_causal=args.is_causal,
-        )
-        model = TimeModulatedLoopedTF(model_args).cuda()
-    else:
-        model_args = GPTConfig(
-            block_size=task.config["max_length"],
-            vocab_size=task.config["vocab_size"],
-            n_layer=args.n_layer,
-            n_head=args.n_head,
-            n_embd=args.n_embd,
-            dropout=0.0,
-            # is_causal=args.is_causal,
-        )
-        model = GPT(args).cuda()
+    model = build_model(args, task)
+    model.cuda()
 
     if args.model_path:
         model.load_state_dict(torch.load(args.model_path), strict=True)
@@ -172,19 +118,15 @@ def main():
         if (epoch + 1) % 10 == 0:
             model.eval()
             with torch.no_grad():
-                if args.task == "word":
+                if args.task == "word" or args.task == "cvp":
                     total_acc = torch.zeros(task.config["max_length"], device="cpu")
                 else:
                     total_acc = torch.tensor(0.0, device="cpu")
-                # seq_len = curriculum.sample_sequence_length()
-                # print(f"Evaluating at Sequence Length: {seq_len}")
                 for i, (input_ids, y) in enumerate(tqdm(test_loader)):
                     inputs, y = input_ids.cuda(), y.long().cuda()
                     logits = model(inputs)
                     acc = task.accuracy_fn(logits, y).detach().cpu()
                     total_acc += acc
-                    # acc = task.accuracy_fn(logits, y)  # .detach().cpu()
-                    # total_acc += acc.item()
             avg_acc = total_acc / len(test_loader)
             wandb.log({"test_accuracy": avg_acc})
             print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")

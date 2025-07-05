@@ -1,3 +1,4 @@
+from .nc1.bfvp import BooleanFormulaValueProblemDataset, BooleanFormulaValueProblemTask
 from .nc1.word import WordProblemDataset, WordProblemTask
 from .nc2.path import ReachabilityDataset, ReachabilityTask
 from .p_complete.cvp import CircuitValueProblemDataset, CircuitValueProblemTask
@@ -21,5 +22,11 @@ def get_task_and_datasets(args):
         task = ReachabilityTask()
         train_dataset = ReachabilityDataset(task.config, split="train")
         test_dataset = ReachabilityDataset(task.config, split="test")
+    elif args.task == "bfvp":
+        task = BooleanFormulaValueProblemTask()
+        train_dataset = BooleanFormulaValueProblemDataset(task.config, split="train")
+        test_dataset = BooleanFormulaValueProblemDataset(task.config, split="test")
+    else:
+        raise ValueError(f"Unknown task: {args.task}")
 
     return task, train_dataset, test_dataset
