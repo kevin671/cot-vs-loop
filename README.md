@@ -31,6 +31,11 @@ YT, Mixture of expertやrelaxing系のアーキテクチャをちゃんと取り
 
 実験を先にやって、そのあとに計算量理論をちゃんと本文にいれる
 
+
+CoTと比較できるやつはちゃんと比較する（arithmaticと動的計画法edit distance, lcs, regular exp machintg）
+等間隔に取り出したやつで学習してできないことを示す
+
+
 ### NC1
 - Word Problem
 - Boolean Formula
@@ -84,16 +89,6 @@ python -m experiments.train --task path --input_length 8 --model Looped --n_laye
 
 # CFGの方はcausalでも良いのかな？いやアルゴリズム的にだめな可能性も
 python -m experiments.train --task path --input_length 8 --model Looped --n_layer 2 --is_causal--n_loop 8 --epoch 1000  
-```
-
-### P-complete
-- Circuit Value Problem
-- Context-free Grammar Membership Testing (n^3なので、n=3,4,5くらいを解ければ十分なのか？100ループでn=5か...まあLoopedの弱さが示せてよいかも)
-
-Dataset generation
-```shell
-python gen_data/cvp.py --num_nodes 64 --train_size 1000000 --test_size 10000 --data_dir data/cvp --seed 42
-python -m experiments.train --task cvp --input_length 64 --model Looped --n_layer 2 --n_loop 64 --is_causal --epoch 1000
 ```
 
 ### #P
