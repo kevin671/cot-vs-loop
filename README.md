@@ -18,10 +18,24 @@ python experiments/train.py
 
 ## Looped Transfomrers and Parallel Computation
 
+一応ベースラインとして5層？くらいのTFで解けないことが言えたら嬉しいかも？
+パラメータ効率良い、ループ
+
+良いループ数を自動的に見つけるのは難しいのかな...
+手で毎回設定するのは非現実的だぞ...
+
+ループ数を変えるのはあれか、計算要件的な嬉しさだけかな？別にlength genralizationで必要なのかな？（根本的な嬉しさがあるのか？）
+次のテーマにできないかな
+
+YT, Mixture of expertやrelaxing系のアーキテクチャをちゃんと取り入れる
+
+実験を先にやって、そのあとに計算量理論をちゃんと本文にいれる
+
 ### NC1
 - Word Problem
 - Boolean Formula
-- Arithmetic Expression
+- Arithmetic Expression (これそもそもNC1なのか...？)
+- fixed regular language? (nc1-complete? mrillさんの論文でいっていたのは？)
 
 Word problemsは
 n = 256まで (16, 32, 64, 128, 256)
@@ -45,12 +59,19 @@ use --is_causal only for word problem
 
 ### NC2
 - Reachability
+- Regular Expression Matching (本当にNC2?)
 - Fixed Context-Free-Grammar Membership Testing 
+- pairwise sequence alignment (Longest Common Subsequence, Edit Distnace (本当にNC2?))
 
 n = 4, 8, 16, 32, 64くらいでよいかな？
 ループ数が4, 9, 16, 25, 36的な感じで増えるといいけど
 カリキュラムありなら n = 64までいけるかな？
 
+動的計画法は
+n = ... , 32, 64, ループ数64, 91くらいまで？
+tmltを使う？論文で一言いうか、positional encodingを実装するための方法が2つあって、universalやtmlt的
+
+カリキュラムを使う
 
 Dataset generation
 ```shell
@@ -67,6 +88,7 @@ python -m experiments.train --task path --input_length 8 --model Looped --n_laye
 
 ### P-complete
 - Circuit Value Problem
+- Context-free Grammar Membership Testing (n^3なので、n=3,4,5くらいを解ければ十分なのか？100ループでn=5か...まあLoopedの弱さが示せてよいかも)
 
 Dataset generation
 ```shell
@@ -95,3 +117,4 @@ python experiments/train.py --task bayes_net --model GPT --n_embd 256 --n_head 4
 - [Why think step by step? Reasoning emerges from the locality of experience (NeurIPS 2023)](https://github.com/benpry/why-think-step-by-step)
 - [Neural Networks and the Chomsky Hierarchy (ICLR 2023)](https://github.com/google-deepmind/neural_networks_chomsky_hierarchy/tree/main)
 - [The Illusion of State in State-Space Models (ICML 2024)](https://github.com/jopetty/word-problem)
+- [MoEUT: Mixture-of-Experts Universal Transformers (NeurIPS 2024)](https://github.com/RobertCsordas/moeut)
