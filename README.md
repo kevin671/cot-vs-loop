@@ -16,8 +16,6 @@ conda activate cotloop
 python experiments/train.py
 ```
 
-## Looped Transfomrers and Parallel Computation
-
 一応ベースラインとして5層？くらいのTFで解けないことが言えたら嬉しいかも？
 パラメータ効率良い、ループ
 
@@ -39,7 +37,7 @@ CoTと比較できるやつはちゃんと比較する（arithmaticと動的計�
 ### NC1
 - Word Problem
 - Boolean Formula
-- Arithmetic Expression (これそもそもNC1なのか...？)
+- **Arithmetic Expression** (これそもそもNC1なのか...？) CoTと比較
 - fixed regular language? (nc1-complete? mrillさんの論文でいっていたのは？)
 
 Word problemsは
@@ -66,7 +64,7 @@ use --is_causal only for word problem
 - Reachability
 - Regular Expression Matching (本当にNC2?)
 - Fixed Context-Free-Grammar Membership Testing 
-- pairwise sequence alignment (Longest Common Subsequence, Edit Distnace (本当にNC2?))
+- **pairwise sequence alignment (Longest Common Subsequence, Edit Distnace (本当にNC2?))** CoTと比較
 
 n = 4, 8, 16, 32, 64くらいでよいかな？
 ループ数が4, 9, 16, 25, 36的な感じで増えるといいけど
@@ -81,7 +79,14 @@ tmltを使う？論文で一言いうか、positional encodingを実装するた
 Dataset generation
 ```shell
 python gen_data/path.py --num_nodes 8 --train_size 1000000 --test_size 1000 --data_dir data/path --seed 42
+
+python gen_data/strings.py --train_size 1000000 --test_size 1000 --data_dir data/ed --length 16
+
+python gen_data/strings.py --train_size 1000000 --test_size 1000 --data_dir data/lcs --length 16 --insert_cost 0 --delete_cost 0 --replace_cost 0 --match_cost 1 --objective max
 ```
+set length for {16,32,64}
+
+chainのやつはn=32,64で、
 
 Training
 ```shell

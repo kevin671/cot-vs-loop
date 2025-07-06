@@ -1,6 +1,11 @@
 from .nc1.bfvp import BooleanFormulaValueProblemDataset, BooleanFormulaValueProblemTask
 from .nc1.word import WordProblemDataset, WordProblemTask
 from .nc2.path import ReachabilityDataset, ReachabilityTask
+from .nc2.strings import (
+    EditDistanceTask,
+    LongestCommonSubsequenceTask,
+    PairwiseAlignmentDataset,
+)
 from .sharp_p.bayes_net import BayesNetOnlineDataset, BayesNetTask
 
 
@@ -21,6 +26,14 @@ def get_task_and_datasets(args):
         task = BooleanFormulaValueProblemTask()
         train_dataset = BooleanFormulaValueProblemDataset(task.config, split="train")
         test_dataset = BooleanFormulaValueProblemDataset(task.config, split="test")
+    elif args.task == "ed":
+        task = EditDistanceTask()
+        train_dataset = PairwiseAlignmentDataset(task.config, split="train")
+        test_dataset = PairwiseAlignmentDataset(task.config, split="test")
+    elif args.task == "lcs":
+        task = LongestCommonSubsequenceTask()
+        train_dataset = PairwiseAlignmentDataset(task.config, split="train")
+        test_dataset = PairwiseAlignmentDataset(task.config, split="test")
     else:
         raise ValueError(f"Unknown task: {args.task}")
 
