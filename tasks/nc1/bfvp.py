@@ -12,12 +12,12 @@ class BooleanFormulaValueProblemDataset(CurriculumDataset):
         dictionary = {"<pad>": 0, "<cls>": 1}
 
         for i in range(len(signs)):
-            dictionary[signs[i]] = len(dictionary) + 1
+            dictionary[signs[i]] = len(dictionary)
 
         self.max_input_size = config["max_input_size"]
         data_dir = config["data_dir"]
         raw = {}
-        d = 2
+        d = config["min_input_size"]
         while d <= self.max_input_size:
             path = f"{data_dir}/{d}/{split}.txt"
             with open(path) as f:

@@ -11,7 +11,6 @@ class ArithmeticExpressionDataset(CurriculumDataset):
         signs = ["+", "-", "*", "/", "(", ")", "="]
         num_range = config["num_range"]
         dictionary = {"<pad>": 0, "<cls>": 1, "<eos>": 2}
-        # ignore_id = config["ignore_index"]
         data_dir = config["data_dir"]
 
         self.max_input_size = config["max_input_size"]
@@ -21,9 +20,9 @@ class ArithmeticExpressionDataset(CurriculumDataset):
             dictionary[str(i)] = i + 10
 
         raw = {}
-        d = 2
+        d = config["min_input_size"]
         while d <= self.max_input_size:
-            path = f"{data_dir}/{d}/{split}.txt"
+            path = f"{data_dir}/{d}/decoder/{split}_data.txt"
             with open(path) as f:
                 lines = [line.split() for line in f.read().splitlines()]
             raw[d] = lines
@@ -33,20 +32,12 @@ class ArithmeticExpressionDataset(CurriculumDataset):
         for length, lines in raw.items():
             xs, ys = [], []
             for tokens in lines:
-                # find '='
                 eq_pos = tokens.index("=")
                 seq = tokens[:eq_pos]
-                # 先頭に <cls> を追加
                 seq = ["<cls>"] + seq
                 xs.append(torch.tensor([dictionary[t] for t in seq], dtype=torch.long))
-                # answer: '=' の直後のトークンを整数に
                 ans_tok = tokens[eq_pos + 1]
-                # y_seq = torch.full((len(seq),), ignore_id, dtype=torch.long)
-                # y_seq[-1] = dictionary[ans_tok]
-                # ys.append(y_seq)
                 ys.append(torch.tensor(dictionary[ans_tok], dtype=torch.long))
-            # self.X[length] = torch.nn.utils.rnn.pad_sequence(xs, batch_first=True, padding_value=dictionary["<pad>"])
-            # self.Y[length] = torch.nn.utils.rnn.pad_sequence(ys, batch_first=True, padding_value=ignore_id)
             self.X[length] = xs
             self.Y[length] = ys
 
@@ -69,23 +60,14 @@ class ArithmeticExpressionTask(GeneralizationTask):
         "max_input_size": 64,
         "max_length": 64 * 4 + 1,  # 3,
         "num_range": 11,
-        # "ignore_index": -100,
+        "min_input_size": 4,
     }
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # loss = F.cross_entropy(
-        #    output.view(-1, output.size(-1)), target.view(-1), ignore_index=-self.config["ignore_index"]
-        # )
-        last_logits = output[:, 0, :]  # (batch_size, vocab_size)
-        return F.cross_entropy(last_logits, target)
+        cls_logits = output[:, 0, :]  # (batch_size, vocab_size)
+        return F.cross_entropy(cls_logits, target)
 
     def accuracy_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # preds = output.argmax(dim=-1)
-        # valid_mask = target != self.config["ignore_index"]
-        # correct = (preds == target) & valid_mask
-        # correct_count = correct.sum().float()
-        # total_count = valid_mask.sum().float()
-        # return correct_count / total_count
         pred = output[:, 0, :].argmax(dim=-1)  # (batch_size,)
         return (pred == target).float().mean()
 

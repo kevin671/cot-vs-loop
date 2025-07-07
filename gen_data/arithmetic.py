@@ -13,6 +13,7 @@ parser.add_argument("--train_size", type=float, default=1e6)
 parser.add_argument("--test_size", type=float, default=1e5)
 parser.add_argument("--number_range", type=int, default=11)
 parser.add_argument("--under", action="store_true", default=False)
+parser.add_argument("--make_chain", action="store_true", default=False)
 
 args = parser.parse_args()
 np.random.seed(2023)
@@ -110,43 +111,56 @@ def get(length):
     return ans[:-1]
 
 
-def build_dataset(depth: int, train_size: int, test_size: int, out_dir: str, fname: str = "arithmetic") -> None:
+def build_dataset(
+    depth: int, train_size: int, test_size: int, out_dir: str, fname: str = "arithmetic", make_chain: bool = False
+):
     os.makedirs(out_dir, exist_ok=True)
     train_set, test_set = set(), set()
 
-    # Train
     while len(train_set) < train_size:
         train_set.add(tuple(get(depth)))
-    # Test
+
     while len(test_set) < test_size:
         h = tuple(get(depth))
         if h not in train_set:
             test_set.add(h)
 
-    # ---- 書き込み ("最終式 = 答え" だけ) ----
-    def dump(fname, data):
+    def dump(fname, data, history_only=False):
         with open(os.path.join(out_dir, fname), "w") as f:
             for hist in data:
-                for tok in hist:  # 最終式～最初の '=' まで出力
+                for tok in hist:
                     print(tok, end=" ", file=f)
-                    if tok == "=":
+                    if not history_only and tok == "=":
                         break
-                print(hist[-1], file=f)  # ラベル（最終値）
+                print("" if history_only else hist[-1], file=f)
 
-    dump("train.txt", train_set)
-    dump("test.txt", test_set)
+    dump("train_data.txt", train_set, history_only=make_chain)
+    dump("test_data.txt", test_set)
 
 
 if __name__ == "__main__":
     base_dir = args.data_dir
-    if args.under:
-        d = 2
-        while d <= args.max_depth:
-            subdir = os.path.join(base_dir, str(d))
-            build_dataset(d, int(args.train_size), int(args.test_size), subdir)
-            print(f"Dataset for length {d} written to: {subdir}")
-            d *= 2
+    if args.make_chain:
+        if args.under:
+            d = 4
+            while d <= args.max_depth:
+                subdir = os.path.join(base_dir, str(d), "chain")
+                build_dataset(d, int(args.train_size), int(args.test_size), subdir, make_chain=True)
+                print(f"Dataset for length {d} written to: {subdir}")
+                d *= 2
+        else:
+            subdir = os.path.join(base_dir, str(args.max_depth), "chain")
+            build_dataset(args.max_depth, int(args.train_size), int(args.test_size), subdir, make_chain=True)
     else:
-        build_dataset(args.max_depth, int(args.train_size), int(args.test_size), base_dir)
+        if args.under:
+            d = 4
+            while d <= args.max_depth:
+                subdir = os.path.join(base_dir, str(d), "decoder")
+                build_dataset(d, int(args.train_size), int(args.test_size), subdir)
+                print(f"Dataset for length {d} written to: {subdir}")
+                d *= 2
+        else:
+            subdir = os.path.join(base_dir, str(args.max_depth), "decoder")
+            build_dataset(args.max_depth, int(args.train_size), int(args.test_size), subdir)
 
-    print(f"Datasets successfully written to: {base_dir}")
+    print(f"Datasets successfully written.")

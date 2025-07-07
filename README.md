@@ -16,29 +16,10 @@ conda activate cotloop
 python experiments/train.py
 ```
 
-一応ベースラインとして5層？くらいのTFで解けないことが言えたら嬉しいかも？
-パラメータ効率良い、ループ
-
-良いループ数を自動的に見つけるのは難しいのかな...
-手で毎回設定するのは非現実的だぞ...
-
-ループ数を変えるのはあれか、計算要件的な嬉しさだけかな？別にlength genralizationで必要なのかな？（根本的な嬉しさがあるのか？）
-次のテーマにできないかな
-
-YT, Mixture of expertやrelaxing系のアーキテクチャをちゃんと取り入れる
-
-実験を先にやって、そのあとに計算量理論をちゃんと本文にいれる
-
-
-CoTと比較できるやつはちゃんと比較する（arithmaticと動的計画法edit distance, lcs, regular exp machintg）
-等間隔に取り出したやつで学習してできないことを示す
-
-
 ### NC1
 - Word Problem
 - Boolean Formula
 - **Arithmetic Expression** (これそもそもNC1なのか...？) CoTと比較
-- fixed regular language? (nc1-complete? mrillさんの論文でいっていたのは？)
 
 Word problemsは
 n = 256まで (16, 32, 64, 128, 256)
@@ -114,7 +95,5 @@ python experiments/train.py --task bayes_net --model GPT --n_embd 256 --n_head 4
 
 ## Acknowledgement
 - [Towards Revealing the Mystery behind Chain of Thought: a Theoretical Perspective (NeurIPS 2023)](https://github.com/guyuntian/CoT_benchmark)
-- [Why think step by step? Reasoning emerges from the locality of experience (NeurIPS 2023)](https://github.com/benpry/why-think-step-by-step)
 - [Neural Networks and the Chomsky Hierarchy (ICLR 2023)](https://github.com/google-deepmind/neural_networks_chomsky_hierarchy/tree/main)
 - [The Illusion of State in State-Space Models (ICML 2024)](https://github.com/jopetty/word-problem)
-- [MoEUT: Mixture-of-Experts Universal Transformers (NeurIPS 2024)](https://github.com/RobertCsordas/moeut)
