@@ -1,16 +1,16 @@
 import itertools
-import os
 import random
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List
 
 import networkx as nx
 import torch
 import torch.nn.functional as F
+from torch.utils.data import IterableDataset
 
-from tasks.task import CurriculumDataset, GeneralizationTask
+from tasks.task import GeneralizationTask
 
 
-def make_random_dag(num_nodes: int, num_edges: int, *, seed: int = 0) -> nx.DiGraph:
+def make_random_dag(num_nodes: int, num_edges: int, seed: int = 0) -> nx.DiGraph:
     rng = random.Random(seed)
     nodes = list(range(num_nodes))
     G = nx.DiGraph()
@@ -21,7 +21,7 @@ def make_random_dag(num_nodes: int, num_edges: int, *, seed: int = 0) -> nx.DiGr
     return G
 
 
-def make_cpts(G: nx.DiGraph, *, seed: int = 0):
+def make_cpts(G: nx.DiGraph, seed: int = 0):
     rng = random.Random(seed)
     cpts = {}
     for node in G.nodes:
@@ -31,111 +31,214 @@ def make_cpts(G: nx.DiGraph, *, seed: int = 0):
     return cpts
 
 
-def ancestral_sample(G: nx.DiGraph, cpts) -> Dict[int, int]:
+def ancestral_sample(G: nx.DiGraph, cpts, rng: random.Random) -> Dict[int, int]:
     sample = {}
     for node in nx.topological_sort(G):
         parents, table = cpts[node]
         p1 = table[tuple(sample[p] for p in parents)]
-        sample[node] = 1 if random.random() < p1 else 0
+        sample[node] = 1 if rng.random() < p1 else 0
     return sample
 
 
-class BayesNetOnlineDataset(torch.utils.data.IterableDataset):
-    def __init__(self, config, split: str = "train", seed: int = 42):
+def deterministic_cpts(G: nx.DiGraph, seed: int = 0):
+    rng = random.Random(seed)
+    cpts = {}
+
+    for node in G.nodes:
+        parents = list(G.predecessors(node))
+        arity = len(parents)
+        flip = tuple(rng.randint(0, 1) for _ in range(arity))
+
+        if arity == 0:
+            table = {(): 0.5}
+        else:
+            table = {
+                bits: sum(b ^ f for b, f in zip(bits, flip)) % 2 for bits in itertools.product([0, 1], repeat=arity)
+            }
+
+        cpts[node] = (parents, table)
+
+    return cpts
+
+
+def ancestral_sample_det(G: nx.DiGraph, cpts, rng: random.Random) -> Dict[int, int]:
+    sample = {}
+    for node in nx.topological_sort(G):
+        parents, table = cpts[node]
+        if len(parents) == 0:
+            sample[node] = 1 if rng.random() < 0.5 else 0
+        else:
+            sample[node] = table[tuple(sample[p] for p in parents)]
+    return sample
+
+
+class BayesNetOnlineDataset(IterableDataset):
+    def __init__(self, config, deterministic=False, split: str = "train", seed: int = 42):
         super().__init__()
         self.num_nodes = config["num_nodes"]
         self.num_edges = config["num_edges"]
         self.max_len = config["max_length"]
         self.ignore_index = config["ignore_index"]
+        self.mode = split
 
         self.G = make_random_dag(self.num_nodes, self.num_edges, seed)
-        self.cpts = make_cpts(self.G, seed)
+        if deterministic:
+            self.cpts = deterministic_cpts(self.G)
+            self._sample_fn = ancestral_sample_det
+        else:
+            self.cpts = make_cpts(self.G, seed)
+            self._sample_fn = ancestral_sample
+
         self.topo = list(nx.topological_sort(self.G))
 
+        self.roots = [v for v in self.G.nodes if self.G.in_degree(v) == 0]
+        self.non_root_indices = [i for i, v in enumerate(self.topo) if v not in self.roots]
+        self.query_node = self.topo[-1]
+
         self._build_vocab()
+        # print(self.cpts)
 
     def _build_vocab(self) -> None:
         self.tok2id: Dict[str, int] = {}
         add = lambda tok: self.tok2id.setdefault(tok, len(self.tok2id))
 
         add("<pad>")
-        add("|")
+        add("<mask>")
         add("0")
         add("1")
         for i in range(self.num_nodes):
             add(f"{i}=")
 
         self.pad_id = self.tok2id["<pad>"]
+        # self.mask_id = self.tok2id["<mask>"]
 
     def _encode_tokens(self, toks: List[str]) -> List[int]:
         return [self.tok2id[t] for t in toks]
 
     def __iter__(self):
-        rng = random.Random(torch.initial_seed())
+        # MASK_PROB = 0.15
+        MASK_TOKEN = "<mask>"
+
+        rng = random.Random(torch.initial_seed() % (2**32))
         while True:
-            assign = ancestral_sample(self.G, self.cpts)
+            assign = self._sample_fn(self.G, self.cpts, rng)
 
-            seen = []
-            for q in self.topo:
-                ctx_tokens = [f"{v}= {assign[v]}" for v in seen]
-                sample_tokens = [f"{q}=", "|", *ctx_tokens, f"{q}= {assign[q]}"]
-                ids = [self.tok2id[t] for t in sample_tokens]
+            if self.mode == "train":
+                q_idx = rng.choice(self.non_root_indices)
+                q = self.topo[q_idx]
+                pa_q = set(self.G.predecessors(q))
 
-                pad = [self.tok2id["<pad>"]] * (self.max_len - len(ids))
-                input_ids = ids + pad
+                tokens: list[str] = []
+                labels: list[int] = []
 
-                labels = torch.full((self.max_len,), self.ignore_index, dtype=torch.long)
-                labels[len(ids) - 1] = self.tok2id[str(assign[q])]  # 0/1 トークンの id
+                for node in self.topo:
+                    var_tok = f"{node}="
+                    if node == q:
+                        tokens.extend([var_tok, MASK_TOKEN])
+                        labels.extend([self.ignore_index, self.tok2id[str(assign[node])]])
 
-                yield torch.tensor(input_ids), labels
-                seen.append(q)
+                    elif (node in self.roots) or (node in pa_q):
+                        tokens.extend([var_tok, str(assign[node])])
+                        labels.extend([self.ignore_index, self.ignore_index])
+
+                    else:
+                        tokens.extend([var_tok, MASK_TOKEN])
+                        labels.extend([self.ignore_index, self.ignore_index])
+                """
+                q_idx = rng.choice(self.non_root_indices)
+                q = self.topo[q_idx]
+                ctx = self.topo[: q_idx + 1]
+
+                tokens, labels = [], []
+
+                for node in ctx:
+                    var_tok = f"{node}="
+                    val_tok = str(assign[node])
+
+                    mask = node == q or (node not in self.roots and rng.random() < MASK_PROB)
+
+                    if mask:
+                        tokens.extend([var_tok, MASK_TOKEN])
+                        labels.extend([self.ignore_index, self.tok2id[val_tok]])
+                    else:
+                        tokens.extend([var_tok, val_tok])
+                        labels.extend([self.ignore_index, self.ignore_index])
+                """
+            else:
+                # q = self.query_node
+                tokens, labels = [], []
+                for node in self.topo:
+                    var_tok = f"{node}="
+                    if node in self.roots:
+                        tokens.extend([var_tok, str(assign[node])])
+                        labels.extend([self.ignore_index, self.ignore_index])
+                    else:
+                        tokens.extend([var_tok, MASK_TOKEN])
+                        labels.extend([self.ignore_index, self.tok2id[str(assign[node])]])
+
+            # print(tokens, labels)
+            # ['0=', '0', '4=', '<mask>', '2=', '<mask>', '1=', '1', '3=', '0', '5=', '<mask>', '7=', '<mask>', '6=', '<mask>', '8=', '<mask>', '9=', '<mask>']
+            # [-100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, 4, -100, -100, -100, -100, -100, -100]
+
+            input_ids = [self.tok2id[t] for t in tokens]
+            # pad_len = self.max_len - len(input_ids)
+
+            # input_ids.extend([self.pad_id] * pad_len)
+            # labels.extend([self.ignore_index] * pad_len)
+
+            yield torch.tensor(input_ids, dtype=torch.long), torch.tensor(labels, dtype=torch.long)
 
 
 class BayesNetTask(GeneralizationTask):
-    # Warning: Use causal mask for this task
-    num_nodes = 10
+    num_nodes = 20
     config = {
         "name": "bayes_net",
         "description": "Ancestor sampling in Bayesian networks.",
         "data_dir": "data/bayes_net",
         "num_nodes": num_nodes,
         "num_edges": num_nodes * 2,
-        "max_length": num_nodes * 2 + 2,
+        "max_length": num_nodes * 2,
         "ignore_index": -100,
     }
     config["vocab_size"] = num_nodes + 4
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return F.cross_entropy(
-            output.view(-1, output.size(-1)),
-            target.view(-1),
-            ignore_index=self.config["ignore_index"],
+        loss = F.cross_entropy(
+            output.view(-1, output.size(-1)), target.view(-1), ignore_index=self.config["ignore_index"]
         )
-
-    def _select_logits01(self, last_logits: torch.Tensor) -> torch.Tensor:
-        ds = getattr(self, "_cached_ds", None)
-        if ds is None:
-            # TODO: CoT用の評価へ
-            self._cached_ds = None  # BayesNetDataset(self.config, split="test")
-            ds = self._cached_ds
-        logits01 = torch.stack((last_logits[:, ds.id0], last_logits[:, ds.id1]), dim=-1)  # (B,2)
-        return logits01
+        return loss
 
     def accuracy_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # we assume the test data has the same length, so we can use the last time step
-        # this is for looped
-        last_logits = output[:, -1, :]
-        logits01 = self._select_logits01(last_logits)
-        prob1 = F.softmax(logits01, dim=-1)[:, 1]
-        rmse = torch.sqrt(F.mse_loss(prob1, target.float()))
-        return rmse
+        pred = output.argmax(dim=-1)  # (B, T)
+        mask = target != self.config["ignore_index"]
+
+        correct = (pred == target) & mask  # (B, T) bool
+        pos_correct = correct.sum(dim=0)  # (T,)
+        pos_total = mask.sum(dim=0)  # (T,)
+
+        acc_per_pos = torch.where(
+            pos_total > 0,
+            pos_correct.float() / pos_total.float(),
+            torch.full_like(pos_total, float("nan"), dtype=torch.float),
+        )
+        return acc_per_pos
+
+        """
+        # TODO: 確率的な場合にCoTはサンプリングして評価する必要がある。その平均をaccuracyとする。
+        num_valid = mask.sum()
+        acc = correct.sum().float() / num_valid.float()
+        return acc
+        """
 
 
 if __name__ == "__main__":
     # Example usage
     task = BayesNetTask()
-    dataset = BayesNetOnlineDataset(task.config, split="test")
-    print(f"Number of samples in {dataset.split} set: {len(dataset)}")
-    for i in range(5):
-        input_ids, label = dataset[i]
-        print(f"Input IDs: {input_ids}, Label: {label}")
+    # dataset = BayesNetOnlineDataset(task.config, split="test")
+    dataset = BayesNetOnlineDataset(task.config, deterministic=True, split="test")
+    # print(f"Number of samples in {dataset.split} set: {len(dataset)}")
+    for i, (input_ids, label) in enumerate(dataset):
+        if i >= 200:  # Get only the first 5 samples for demonstration
+            break
+        # print(f"Sample {i+1}: Input IDs: {input_ids}")
+        print(input_ids.tolist())

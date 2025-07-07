@@ -135,7 +135,7 @@ class GPT(nn.Module):
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
-    def forward(self, idx):  # , targets=None):
+    def forward(self, idx, **kwargs):
         device = idx.device
         b, t = idx.size()
         assert (
@@ -247,7 +247,7 @@ class LoopedTF(nn.Module):
 
         print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, n_loop=None):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size
@@ -261,19 +261,27 @@ class LoopedTF(nn.Module):
 
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
 
+        pred_list = []  # for storing predictions at each loop if n_loop is not None
         tok_emb = self.transformer.wte(idx)
         x = self.transformer.drop(tok_emb)
-        for step in range(self.config.n_loop):
+        for step in range(self.config.n_loop if n_loop is None else n_loop):
             x += self.timing_signal.to(device)[:, step, :]  # add timing signal
             x += self.position_signal.to(device)[:, pos, :]  # add position signal
 
             for block in self.transformer.h:
                 x = block(x, attn_mask)
-        x = self.transformer.ln_f(x)
 
-        logits = self.lm_head(x)
+            if n_loop is not None:
+                pred_list.append(self.lm_head(self.transformer.ln_f(x)))
 
-        return logits
+        if n_loop is not None:
+            return torch.stack(pred_list, dim=0)
+
+        else:
+            x = self.transformer.ln_f(x)
+            logits = self.lm_head(x)
+
+            return logits
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
