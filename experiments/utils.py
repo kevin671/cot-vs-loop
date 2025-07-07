@@ -1,10 +1,6 @@
-import math
-import os
-from typing import Optional
-
 import torch
 from torch import optim
-from transformers import get_scheduler, set_seed
+from transformers import get_scheduler
 
 
 def set_optimizer_scheduler(

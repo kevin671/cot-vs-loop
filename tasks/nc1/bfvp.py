@@ -1,6 +1,3 @@
-from pathlib import Path
-from typing import Dict, List, Tuple
-
 import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
@@ -58,6 +55,7 @@ class BooleanFormulaValueProblemTask(GeneralizationTask):
         "vocab_size": 9,
         "max_input_size": 64,
         "max_length": 64 * 4 + 1,
+        "min_input_size": 8,
     }
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:

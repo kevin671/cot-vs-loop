@@ -87,7 +87,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     random.seed(2023)
 
-    depths = [2**i for i in range(1, int(math.log2(args.max_depth)) + 1)]
+    depths = [2**i for i in range(3, int(math.log2(args.max_depth)) + 1)]
     for d in depths:
         base = os.path.join(args.data_dir, str(d))
         build_dataset(d, args.train_size, args.test_size, base)

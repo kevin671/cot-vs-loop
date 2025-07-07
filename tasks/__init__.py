@@ -6,15 +6,10 @@ from .nc2.strings import (
     LongestCommonSubsequenceTask,
     PairwiseAlignmentDataset,
 )
-from .sharp_p.bayes_net import BayesNetOnlineDataset, BayesNetTask
 
 
 def get_task_and_datasets(args):
-    if args.task == "bayes_net":
-        task = BayesNetTask()
-        train_dataset = BayesNetOnlineDataset(task.config, split="train")
-        test_dataset = BayesNetOnlineDataset(task.config, split="test")
-    elif args.task == "word":
+    if args.task == "word":
         task = WordProblemTask()
         train_dataset = WordProblemDataset(task.config, split="train")
         test_dataset = WordProblemDataset(task.config, split="test")
@@ -34,6 +29,10 @@ def get_task_and_datasets(args):
         task = LongestCommonSubsequenceTask()
         train_dataset = PairwiseAlignmentDataset(task.config, split="train")
         test_dataset = PairwiseAlignmentDataset(task.config, split="test")
+    elif args.task == "reg":
+        pass
+    elif args.task == "fixed_cfg":
+        pass
     else:
         raise ValueError(f"Unknown task: {args.task}")
 

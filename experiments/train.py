@@ -17,7 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description="train")
 
     parser.add_argument("--task", type=str, default="arithmetic")
-    parser.add_argument("--input_length", type=int)
+    parser.add_argument("--input_size", type=int)
 
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--epoch", type=int, default=100)
@@ -44,6 +44,8 @@ def main():
 
     task, train_dataset, test_dataset = get_task_and_datasets(args)
 
+    print(task.config)
+
     collate_fn = getattr(task, "collate_fn", None)
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
@@ -54,11 +56,12 @@ def main():
 
     from .curriculum import GeometricIncreaseCurriculum, RegularIncreaseCurriculum
 
-    max_length = args.input_length
+    max_length = args.input_size
     # max_length = task.config["max_length"]
+    initial_len = task.config.get("min_input_size", 4)
     if args.task == "word" or args.task == "cvp":
         total_steps = len(train_loader) * args.epoch
-        initial_len = 4
+        # initial_len = 4
         increase_amount = 2
         n_increments = math.ceil((max_length - initial_len) / increase_amount) + 1
         increase_frequency = max(1, total_steps // n_increments)
@@ -70,7 +73,6 @@ def main():
             max_sequence_length=max_length,
         )
     else:
-        initial_len = 2
         increase_factor = 2
         curriculum = GeometricIncreaseCurriculum(
             initial_sequence_length=initial_len,
@@ -93,7 +95,7 @@ def main():
 
     optimizer, scheduler = set_optimizer_scheduler(model, args, train_loader)
 
-    wandb.init(project="CoT-vs-Loop", config=args, name=f"{args.task}_{args.input_length}_{args.model}")
+    wandb.init(project="CoT-vs-Loop", config=args, name=f"{args.task}_{args.input_size}_{args.model}")
 
     for epoch in range(args.epoch):
         model.train()
@@ -113,7 +115,7 @@ def main():
                 lr = optimizer.param_groups[0]["lr"]
                 seq_len = curriculum.sample_sequence_length()
                 wandb.log({"loss": loss.item(), "lr": lr})
-                wandb.log({"input_length": seq_len})
+                wandb.log({"input_size": seq_len})
 
         if (epoch + 1) % 10 == 0:
             model.eval()
