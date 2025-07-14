@@ -88,12 +88,11 @@ class GeometricIncreaseCurriculum(Curriculum):
         self.L_max = max_sequence_length
         self.warmup_steps = warmup_steps
 
-    # ---- helper ----
     def _steps_for_length(self, length: int) -> int:
-        k = max(1, int(math.log2(length)))  # k ≥ 1
+        ratio = max(1, length // self.L0)           # L / L0
+        k = max(1, int(math.log2(ratio)))           # log2(L/L0) (最小1)
         return self.S0 * k
 
-    # ---- API ----
     def current_max_length(self) -> int:
         if self.global_step < self.warmup_steps:
             return self.L0
@@ -119,3 +118,14 @@ class GeometricIncreaseCurriculum(Curriculum):
         if self.sample_all_length:
             return int(np.random.randint(self.L0, L + 1))
         return L
+
+
+class FixedLengthCurriculum(Curriculum):
+    """Always returns a fixed sequence length."""
+
+    def __init__(self, sequence_length: int):
+        super().__init__()
+        self.sequence_length = sequence_length
+
+    def sample_sequence_length(self) -> int:
+        return self.sequence_length

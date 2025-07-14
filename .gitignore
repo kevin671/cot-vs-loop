@@ -10,3 +10,4 @@ out/
 data/
 output/
 binary/unigen
+*.ipynb

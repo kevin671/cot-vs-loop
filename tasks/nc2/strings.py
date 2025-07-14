@@ -9,7 +9,7 @@ from tasks.task import CurriculumDataset, GeneralizationTask
 
 
 class PairwiseAlignmentDataset(CurriculumDataset):
-    def __init__(self, config, split="train") -> None:
+    def __init__(self, config, split="train", chain: bool = False) -> None:
         super().__init__()
         self.config = config
         self.max_input_size = config["max_input_size"]
@@ -19,34 +19,60 @@ class PairwiseAlignmentDataset(CurriculumDataset):
             alphabet = "abcdefghijklmnopqrstuvwxyz"
             for i in range(26):
                 tok2id[alphabet[i]] = i + 6
-            for i in range(3 * config["max_input_size"] + 1):
+            for i in range(config["max_value"]):
                 tok2id[str(i)] = i + 32
             return tok2id
 
         dictionary = build_fixed_vocab(config)
 
-        raw = {}
-        d = config["min_input_size"]
-        data_dir = config["data_dir"]
-        while d <= self.max_input_size:
-            path = f"{data_dir}/{d}/decoder/{split}_data.txt"
+        if chain:
+            path = Path(config["data_dir"]) / f"{config['max_input_size']}/chain/{split}_data.txt"
             with open(path) as f:
                 lines = [line.split() for line in f.read().splitlines()]
-            raw[d] = lines
-            d *= 2
+            raw = {config["max_input_size"]: lines}
+        else:
+            raw = {}
+            d = config["min_input_size"]
+            data_dir = config["data_dir"]
+            while d <= self.max_input_size:
+                path = f"{data_dir}/{d}/decoder/{split}_data.txt"
+                with open(path) as f:
+                    lines = [line.split() for line in f.read().splitlines()]
+                raw[d] = lines
+                d *= 2
 
         self.X, self.Y = {}, {}
-        for length, lines in raw.items():
-            xs, ys = [], []
-            for tokens in lines:
-                eq_pos = tokens.index("<sep>")
-                seq = tokens[:eq_pos]
-                seq = ["<cls>"] + seq
-                xs.append(torch.tensor([dictionary[t] for t in seq], dtype=torch.long))
-                ans_tok = tokens[eq_pos + 1]
-                ys.append(torch.tensor(dictionary[ans_tok], dtype=torch.long))
-            self.X[length] = xs
-            self.Y[length] = ys
+        if chain:
+            for length, lines in raw.items():
+                xs, ys = [], []
+                for tokens in lines:
+                    eq_pos = tokens.index("<sep>")
+                    token_ids = [dictionary[t] for t in tokens]
+
+                    input_ids = torch.tensor(token_ids, dtype=torch.long)
+                    label_ids = torch.tensor(token_ids, dtype=torch.long)
+                    # shift
+                    label_ids = torch.cat([label_ids[1:], torch.tensor([dictionary["<eos>"]], dtype=torch.long)])
+                    # ignore the labels before the <sep>
+                    label_ids[:eq_pos] = config["ignore_index"]
+                    xs.append(input_ids)
+                    ys.append(label_ids)
+
+                self.X[length] = xs
+                self.Y[length] = ys
+
+        else:
+            for length, lines in raw.items():
+                xs, ys = [], []
+                for tokens in lines:
+                    eq_pos = tokens.index("<sep>")
+                    seq = tokens[:eq_pos]
+                    seq = ["<cls>"] + seq
+                    xs.append(torch.tensor([dictionary[t] for t in seq], dtype=torch.long))
+                    ans_tok = tokens[eq_pos + 1]
+                    ys.append(torch.tensor(dictionary[ans_tok], dtype=torch.long))
+                self.X[length] = xs
+                self.Y[length] = ys
 
     def __len__(self) -> int:
         return len(self.X[self.max_input_size])
@@ -60,8 +86,8 @@ class PairwiseAlignmentDataset(CurriculumDataset):
 
 class PairwiseAlignmentTask(GeneralizationTask):
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        last_logits = output[:, 0, :]  # (batch_size, vocab_size)
-        return F.cross_entropy(last_logits, target)
+        cls_logits = output[:, 0, :]  # (batch_size, vocab_size)
+        return F.cross_entropy(cls_logits, target)
 
     def accuracy_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         pred = output[:, 0, :].argmax(dim=-1)  # (batch_size,)
@@ -77,29 +103,119 @@ class PairwiseAlignmentTask(GeneralizationTask):
 
 
 class EditDistanceTask(PairwiseAlignmentTask):
-    max_input_size = 64
-    config = {
-        "name": "edit_distance",
-        "data_dir": "data/ed",
-        "max_input_size": max_input_size,
-        "min_input_size": 16,
-    }
-    config["max_value"] = 3 * (config["max_input_size"] + 2)
-    config["vocab_size"] = config["max_value"] + 11 + 5
-    config["max_length"] = config["max_input_size"] * 2 + 7
+    def __init__(self, max_input_size: int = 64) -> None:
+        config = {
+            "name": "edit_distance",
+            "data_dir": "data/ed",
+            "max_input_size": max_input_size,
+            "min_input_size": 16,
+        }
+        config["max_value"] = 3 * (config["max_input_size"] + 2)
+        config["vocab_size"] = config["max_value"] + 32
+        config["max_length"] = config["max_input_size"] * 2 + 7
+        self.config = config
 
 
 class LongestCommonSubsequenceTask(PairwiseAlignmentTask):
-    max_input_size = 64
-    config = {
-        "name": "longest_common_subsequence",
-        "data_dir": "data/lcs",
-        "max_input_size": max_input_size,
-        "min_input_size": 16,
-    }
-    config["max_value"] = config["max_input_size"] + 2
-    config["vocab_size"] = config["max_value"] + 11 + 5
-    config["max_length"] = config["max_input_size"] * 2 + 7
+    def __init__(self, max_input_size: int = 64) -> None:
+        config = {
+            "name": "longest_common_subsequence",
+            "data_dir": "data/lcs",
+            "max_input_size": max_input_size,
+            "min_input_size": 16,
+        }
+        config["max_value"] = config["max_input_size"] + 5
+        config["vocab_size"] = config["max_value"] + 32
+        config["max_length"] = config["max_input_size"] * 2 + 7
+        self.config = config
+
+
+class EditDistanceTaskChain(GeneralizationTask):
+    def __init__(self, max_input_size: int = 64) -> None:
+        config = {
+            "name": "edit_distance",
+            "data_dir": "data/ed",
+            "max_input_size": max_input_size,
+            "min_input_size": 16,
+            "ignore_index": -100,  # for causal language modeling
+        }
+        config["max_value"] = 3 * (config["max_input_size"] + 3)  # + 10 for the DP table values from chain
+        config["vocab_size"] = config["max_value"] + 32
+        config["max_length"] = config["max_input_size"] * 2 + 7 + (config["max_input_size"] + 3) ** 2
+        self.config = config
+
+    def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        loss = F.cross_entropy(
+            output.view(-1, output.size(-1)), target.view(-1), ignore_index=self.config["ignore_index"]
+        )
+        return loss
+
+    """
+    def accuracy_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        pred = output.argmax(dim=-1)  # (B, T)
+        mask = target != -100  # (B, T)
+
+        # find the last position of each sequence in the batch
+        last_indices = mask.float().cumsum(dim=1)  # (B, T)
+        last_pos = last_indices == last_indices.max(dim=1, keepdim=True).values  # one-hot (B, T)
+
+        # get the predictions and targets at the last position
+        final_preds = pred[last_pos]
+        final_tgts = target[last_pos]
+
+        accuracy = (final_preds == final_tgts).float().mean()
+        return accuracy
+    """
+
+    def accuracy_fn(self, output_idx: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # pad_token_id = 0
+        eos_token_id = 3
+        batch_size, seq_len = output_idx.shape
+
+        """
+        id2tok = {0: "<pad>", 1: "<cls>", 2: "<sep>", 3: "<eos>", 4: "|", 5: ","}
+        alphabet = "abcdefghijklmnopqrstuvwxyz"
+        for i in range(26):
+            id2tok[i + 6] = alphabet[i]
+        for i in range(200):
+            id2tok[i + 32] = str(i)
+        id2tok[-100] = str(-100)
+        output_strings = []
+        for seq in output_idx.tolist():
+            tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
+            output_strings.append(" ".join(tokens))
+        for i, s in enumerate(output_strings):
+            print(f"input [{i}] {s}", flush=True)
+        target_strings = []
+        for seq in target.tolist():
+            tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
+            target_strings.append(" ".join(tokens))
+        for i, s in enumerate(target_strings):
+            print(f"tgt [{i}] {s}", flush=True)
+        """
+
+        eos_mask = output_idx == eos_token_id
+        first_eos_idx = eos_mask.float().cumsum(dim=1).eq(1).float().argmax(dim=1)
+        pred_idx = (first_eos_idx - 1).clamp(min=0)
+
+        eos_mask = target == eos_token_id
+        first_eos_idx = eos_mask.float().cumsum(dim=1).eq(1).float().argmax(dim=1)
+        tgt_idx = (first_eos_idx - 1).clamp(min=0)
+
+        final_preds = output_idx[torch.arange(batch_size), pred_idx]
+        final_tgts = target[torch.arange(batch_size), tgt_idx]
+
+        accuracy = (final_preds == final_tgts).float().mean()
+        return accuracy
+
+    @staticmethod
+    def collate_fn(batch):
+        PAD_ID = 0
+        IGNORE_ID = -100
+        seqs, labels = zip(*batch)
+        padded_inp = pad_sequence(seqs, batch_first=True, padding_value=PAD_ID)  # (B, L_max)
+        padded_tgt = pad_sequence(labels, batch_first=True, padding_value=IGNORE_ID)
+        return padded_inp, padded_tgt
 
 
 if __name__ == "__main__":

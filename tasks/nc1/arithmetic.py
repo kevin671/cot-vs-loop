@@ -52,16 +52,16 @@ class ArithmeticExpressionDataset(CurriculumDataset):
 
 
 class ArithmeticExpressionTask(GeneralizationTask):
-    config = {
-        "name": "arithmetic_expression",
-        "description": "Evaluate an arithmetic expression, which can be viewed as a binary syntax tree.",
-        "data_dir": "data/arithmetic",
-        "vocab_size": 21,
-        "max_input_size": 64,
-        "max_length": 64 * 4 + 1,  # 3,
-        "num_range": 11,
-        "min_input_size": 4,
-    }
+    def __init__(self, max_input_size=64):
+        self.config = {
+            "name": "arithmetic_expression",
+            "data_dir": "data/arithmetic",
+            "vocab_size": 21,
+            "min_input_size": 4,
+            "num_range": 11,
+        }
+        self.config["max_input_size"] = max_input_size
+        self.config["max_length"] = max_input_size * 4 + 1
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         cls_logits = output[:, 0, :]  # (batch_size, vocab_size)

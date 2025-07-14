@@ -8,8 +8,8 @@ parser = argparse.ArgumentParser(description="data")
 
 parser.add_argument("--data_dir", type=str, default="Data")
 parser.add_argument("--length", type=int, default=32)
-parser.add_argument("--train_size", type=float, default=1e6)
-parser.add_argument("--test_size", type=float, default=1e5)
+parser.add_argument("--train_size", type=int, default=100000)
+parser.add_argument("--test_size", type=int, default=10000)
 parser.add_argument("--using", type=int, default=8)
 # The costs for insertion, deletion, replacement, and matching.
 parser.add_argument("--insert_cost", type=int, default=2)
@@ -24,6 +24,9 @@ args = parser.parse_args()
 np.random.seed(2023)
 
 alphabet = [i for i in "abcdefghijklmnopqrstuvwxyz"]
+
+max_len = 0
+max_history = 0
 
 
 def get_seq(diff):
@@ -87,53 +90,71 @@ def solve(str1, str2):
     return matrix if args.make_chain else matrix[-1][-1]
 
 
+def write_train(path, n_examples, args):
+    global max_history, max_len
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    hashes = set()
+    with open(path, "w") as f:
+        for _ in range(n_examples):
+            str1, str2 = get_seq(np.random.randint(args.length) + 1)
+            matrix = solve(str1, str2)
+            final = str1 + ["|"] + str2 + ["<sep>"]
+
+            # 64-bit hash だけ覚えておけばメモリ << 100 MB
+            h = hash(tuple(map(str, final))) & 0xFFFFFFFFFFFFFFFF
+            hashes.add(h)
+
+            for row in range(1, len(matrix)):
+                final = final + matrix[row][1:] + [","]
+            final.append("<sep>")
+            final.append(matrix[-1][-1])
+            max_history = max(max_history, len(final))
+            max_len = max(max_len, len(str1) + len(str2) + 3)
+
+            print(" ".join(map(str, final)), file=f)
+    return hashes
+
+
+def write_test(path, n_examples, args, forbid):
+    global max_history, max_len
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    written = 0
+    with open(path, "w") as f:
+        while written < n_examples:
+            str1, str2 = get_seq(np.random.randint(args.length) + 1)
+            matrix = solve(str1, str2)
+            final = str1 + ["|"] + str2 + ["<sep>"]
+
+            h = hash(tuple(map(str, final))) & 0xFFFFFFFFFFFFFFFF
+            if h in forbid:  # train か既出 test と衝突
+                continue
+            forbid.add(h)
+
+            for row in range(1, len(matrix)):
+                final = final + matrix[row][1:] + [","]
+            final.append("<sep>")
+            final.append(matrix[-1][-1])
+            max_history = max(max_history, len(final))
+            max_len = max(max_len, len(str1) + len(str2) + 3)
+
+            print(" ".join(map(str, final)), file=f)
+
+            written += 1
+
+
 data_dir = f"{args.data_dir}/{args.length}"
 if args.make_chain:
-    train_set = set()
-    max_history = 0
+    costs = dict(insert=2, delete=2, replace=3, match=0, chain=False)
 
-    while len(train_set) < args.train_size:
-        str1, str2 = get_seq(np.random.randint(args.length) + 1)
-        matrix = solve(str1, str2)
-        final = str1 + ["|"] + str2 + ["<sep>"]
-        for row in range(1, len(matrix)):
-            final = final + matrix[row][1:] + [","]
-        final.append("<sep>")
-        final.append(matrix[-1][-1])
-        train_set.add(tuple(final))
-        max_history = max(max_history, len(final))
-        max_len = max(max_len, len(str1) + len(str2) + 3)
+    out_dir = os.path.join(args.data_dir, str(args.length))
+    train_path = os.path.join(out_dir, "chain/train_data.txt")
+    test_path = os.path.join(out_dir, "chain/test_data.txt")
 
-    test_set = set()
-    while len(test_set) < args.test_size:
-        str1, str2 = get_seq(np.random.randint(args.length) + 1)
-        matrix = solve(str1, str2)
-        final = str1 + ["|"] + str2 + ["<sep>"]
-        for row in range(1, len(matrix)):
-            final = final + matrix[row][1:] + [","]
-        final.append("<sep>")
-        final.append(matrix[-1][-1])
-        if tuple(final) not in train_set:
-            test_set.add(tuple(final))
-        max_history = max(max_history, len(final))
-        max_len = max(max_len, len(str1) + len(str2) + 3)
+    hashes = write_train(train_path, args.train_size, args)
+    write_test(test_path, args.test_size, args, hashes)
 
-    os.makedirs(data_dir, exist_ok=True)
-    chain = f"{data_dir}/chain"
-    os.makedirs(chain, exist_ok=True)
-
-    with open(f"{chain}/train_data.txt", "w") as f1:
-        for lst in train_set:
-            for i in lst:
-                print(i, end=" ", file=f1)
-            print("", file=f1)
-
-    with open(f"{chain}/test_data.txt", "w") as f1:
-        for lst in test_set:
-            for i in lst:
-                print(i, end=" ", file=f1)
-            print("", file=f1)
-    print(f"max cot len:{max_history}")
+    print(f"max direct len:{max_len}")
+    print(f"max history len:{max_history}")
 
 else:
     train_set = set()
