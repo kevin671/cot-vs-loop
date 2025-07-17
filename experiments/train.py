@@ -42,6 +42,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default="./output")
     parser.add_argument("--val_interval", type=int, default=10)
     parser.add_argument("--chain", action="store_true")
+    parser.add_argument("--cot_length", type=int, default=None)
     parser.add_argument(
         "--curriculum",
         type=str,
@@ -56,7 +57,7 @@ def main():
     set_seed(seed)
     os.makedirs("./output", exist_ok=True)
 
-    task, train_dataset, test_dataset = get_task_and_datasets(args, chain=args.chain)
+    task, train_dataset, test_dataset = get_task_and_datasets(args, chain=args.chain, cot_length=args.cot_length)
 
     print(task.config)
 
@@ -88,7 +89,7 @@ def main():
         increase_factor = 2
         curriculum = GeometricIncreaseCurriculum(
             initial_sequence_length=initial_len,
-            base_steps=5 * len(train_loader) if args.task == "bfvp" else 10 * len(train_loader),  # S₀
+            base_steps=1 * len(train_loader) if args.task == "bfvp" else 10 * len(train_loader),
             increase_factor=increase_factor,
             sample_all_length=False,
             max_sequence_length=max_length,
@@ -120,8 +121,8 @@ def main():
         for i, (input_ids, y) in enumerate(tqdm(train_loader)):
             inputs, y = input_ids.cuda(), y.long().cuda()
             logits = model(inputs)
-            loss = task.pointwise_loss_fn(logits, y)
 
+            loss = task.pointwise_loss_fn(logits, y)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -145,7 +146,12 @@ def main():
                 for i, (input_ids, y) in enumerate(tqdm(test_loader)):
                     inputs, y = input_ids.cuda(), y.long().cuda()
                     if args.chain:
-                        idx = model.generate(inputs, max_new_tokens=1200, top_k=1)
+                        max_new_tokens = (
+                            task.config["input_size"] * 3 + args.cot_length
+                            if args.cot_length
+                            else task.config["max_length"]
+                        )
+                        idx = model.generate(inputs, top_k=1, max_new_tokens=max_new_tokens)
                         acc = task.accuracy_fn(idx, y).detach().cpu()
                         print(f"Accuracy at step {i}: {acc.item()}", flush=True)
                     else:

@@ -43,20 +43,49 @@ class PairwiseAlignmentDataset(CurriculumDataset):
 
         self.X, self.Y = {}, {}
         if chain:
+            cot_len = config["cot_length"] or config["max_length"] + 1
             for length, lines in raw.items():
                 xs, ys = [], []
                 for tokens in lines:
-                    eq_pos = tokens.index("<sep>")
-                    token_ids = [dictionary[t] for t in tokens]
+                    sep_positions = [i for i, t in enumerate(tokens) if t == "<sep>"]
+                    assert len(sep_positions) == 2
+                    sep1, sep2 = sep_positions
 
-                    input_ids = torch.tensor(token_ids, dtype=torch.long)
-                    label_ids = torch.tensor(token_ids, dtype=torch.long)
-                    # shift
-                    label_ids = torch.cat([label_ids[1:], torch.tensor([dictionary["<eos>"]], dtype=torch.long)])
-                    # ignore the labels before the <sep>
-                    label_ids[:eq_pos] = config["ignore_index"]
-                    xs.append(input_ids)
-                    ys.append(label_ids)
+                    if split == "train":
+                        inp = tokens[: sep1 + 1]  # +1 to include <sep>
+                        cot = tokens[sep1 + 1 : sep2]
+                        ans = tokens[sep2:]  # includes second <sep> and targets
+
+                        # systematic sampling
+                        total_len = len(cot)
+                        if total_len < cot_len:
+                            sampled_cot = cot
+                        else:
+                            indices = [int(i * total_len / cot_len) for i in range(cot_len)]
+                            sampled_cot = [cot[i] for i in indices]
+                            assert len(sampled_cot) == cot_len
+
+                        new_tokens = inp + sampled_cot + ans
+
+                        # eq_pos = tokens.index("<sep>")
+                        token_ids = [dictionary[t] for t in new_tokens]
+
+                        input_ids = torch.tensor(token_ids, dtype=torch.long)
+                        label_ids = torch.tensor(token_ids, dtype=torch.long)
+                        # shift
+                        label_ids = torch.cat([label_ids[1:], torch.tensor([dictionary["<eos>"]], dtype=torch.long)])
+                        # ignore the labels before the <sep>
+                        label_ids[:sep1] = config["ignore_index"]
+                        xs.append(input_ids)
+                        ys.append(label_ids)
+                    else:
+                        inp = tokens[: sep1 + 1]  # <sep> まで含む
+                        ans = tokens[sep2 + 1]  # 次のトークン（解答）
+                        token_ids = [dictionary[t] for t in inp]
+                        input_ids = torch.tensor(token_ids, dtype=torch.long)
+                        label_id = torch.tensor(dictionary[ans], dtype=torch.long)
+                        xs.append(input_ids)
+                        ys.append(label_id)
 
                 self.X[length] = xs
                 self.Y[length] = ys
@@ -131,7 +160,7 @@ class LongestCommonSubsequenceTask(PairwiseAlignmentTask):
 
 
 class EditDistanceTaskChain(GeneralizationTask):
-    def __init__(self, max_input_size: int = 64) -> None:
+    def __init__(self, max_input_size: int = 64, cot_length: int = None) -> None:
         config = {
             "name": "edit_distance",
             "data_dir": "data/ed",
@@ -142,9 +171,17 @@ class EditDistanceTaskChain(GeneralizationTask):
         config["max_value"] = 3 * (config["max_input_size"] + 3)  # + 10 for the DP table values from chain
         config["vocab_size"] = config["max_value"] + 32
         config["max_length"] = config["max_input_size"] * 2 + 7 + (config["max_input_size"] + 3) ** 2
+        config["cot_length"] = cot_length
         self.config = config
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # pred = output.argmax(dim=-1)  # shape: (B, T)
+        # mask = target != self.config["ignore_index"]  # shape: (B, T)
+        # correct = (pred == target) & mask
+        # print(f"Predictions: {pred.tolist()}", flush=True)
+        # print(f"Targets: {target.tolist()}", flush=True)
+        # print(f"Correct: {correct.tolist()}", flush=True)
+
         loss = F.cross_entropy(
             output.view(-1, output.size(-1)), target.view(-1), ignore_index=self.config["ignore_index"]
         )
@@ -186,24 +223,26 @@ class EditDistanceTaskChain(GeneralizationTask):
             output_strings.append(" ".join(tokens))
         for i, s in enumerate(output_strings):
             print(f"input [{i}] {s}", flush=True)
-        target_strings = []
-        for seq in target.tolist():
-            tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
-            target_strings.append(" ".join(tokens))
-        for i, s in enumerate(target_strings):
-            print(f"tgt [{i}] {s}", flush=True)
         """
+        # target_strings = []
+        # for seq in target.tolist():
+        #    tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
+        #    target_strings.append(" ".join(tokens))
+        # for i, s in enumerate(target_strings):
+        #    print(f"tgt [{i}] {s}", flush=True)
+        # print(target.tolist(), flush=True)
 
         eos_mask = output_idx == eos_token_id
         first_eos_idx = eos_mask.float().cumsum(dim=1).eq(1).float().argmax(dim=1)
         pred_idx = (first_eos_idx - 1).clamp(min=0)
 
-        eos_mask = target == eos_token_id
-        first_eos_idx = eos_mask.float().cumsum(dim=1).eq(1).float().argmax(dim=1)
-        tgt_idx = (first_eos_idx - 1).clamp(min=0)
+        # eos_mask = target == eos_token_id
+        # first_eos_idx = eos_mask.float().cumsum(dim=1).eq(1).float().argmax(dim=1)
+        # tgt_idx = (first_eos_idx - 1).clamp(min=0)
 
         final_preds = output_idx[torch.arange(batch_size), pred_idx]
-        final_tgts = target[torch.arange(batch_size), tgt_idx]
+        # final_tgts = target[torch.arange(batch_size), tgt_idx]
+        final_tgts = target
 
         accuracy = (final_preds == final_tgts).float().mean()
         return accuracy
@@ -214,7 +253,12 @@ class EditDistanceTaskChain(GeneralizationTask):
         IGNORE_ID = -100
         seqs, labels = zip(*batch)
         padded_inp = pad_sequence(seqs, batch_first=True, padding_value=PAD_ID)  # (B, L_max)
-        padded_tgt = pad_sequence(labels, batch_first=True, padding_value=IGNORE_ID)
+
+        if isinstance(labels[0], torch.Tensor) and labels[0].dim() == 0:
+            padded_tgt = torch.stack(labels)
+        else:
+            padded_tgt = pad_sequence(labels, batch_first=True, padding_value=IGNORE_ID)
+
         return padded_inp, padded_tgt
 
 

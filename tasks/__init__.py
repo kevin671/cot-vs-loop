@@ -10,7 +10,7 @@ from .nc2.strings import (
 )
 
 
-def get_task_and_datasets(args, chain: bool = False):
+def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
     if args.task == "word":
         task = WordProblemTask()
         train_dataset = WordProblemDataset(task.config, split="train")
@@ -29,7 +29,7 @@ def get_task_and_datasets(args, chain: bool = False):
         test_dataset = ArithmeticExpressionDataset(task.config, split="test")
     elif args.task == "ed":
         if chain:
-            task = EditDistanceTaskChain(max_input_size=args.input_size)
+            task = EditDistanceTaskChain(max_input_size=args.input_size, cot_length=cot_length)
         else:
             task = EditDistanceTask(max_input_size=args.input_size)
         train_dataset = PairwiseAlignmentDataset(task.config, split="train", chain=chain)

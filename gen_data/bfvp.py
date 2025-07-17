@@ -52,27 +52,30 @@ def get_sequence(depth: int) -> list[str]:
     return seq[:-1]
 
 
+def write_split(path: str, n_examples: int, depth: int, forbid=None) -> set[int]:
+    forbid = forbid or set()
+    written = 0
+    with open(path, "w") as f:
+        while written < n_examples:
+            seq = tuple(get_sequence(depth))
+            h = hash(seq) & 0xFFFFFFFFFFFFFFFF  # 64bit
+            if h in forbid:
+                continue
+            forbid.add(h)
+
+            i_eq = seq.index("=")
+            print(" ".join(seq[: i_eq + 1]), seq[-1], file=f)
+            written += 1
+    return forbid
+
+
 def build_dataset(depth, train_size, test_size, out_dir):
     os.makedirs(out_dir, exist_ok=True)
-    train_set, test_set = set(), set()
-    while len(train_set) < train_size:
-        train_set.add(tuple(get_sequence(depth)))
-    while len(test_set) < test_size:
-        seq = tuple(get_sequence(depth))
-        if seq not in train_set:
-            test_set.add(seq)
+    train_path = os.path.join(out_dir, "train.txt")
+    test_path = os.path.join(out_dir, "test.txt")
 
-    def dump(fname, data):
-        with open(os.path.join(out_dir, fname), "w") as f:
-            for seq in data:
-                for tok in seq:
-                    print(tok, end=" ", file=f)
-                    if tok == "=":
-                        break
-                print(seq[-1], file=f)
-
-    dump("train.txt", train_set)
-    dump("test.txt", test_set)
+    hashes = write_split(train_path, train_size, depth)
+    write_split(test_path, test_size, depth, forbid=hashes)
 
 
 if __name__ == "__main__":
@@ -80,15 +83,18 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_dir", type=str, default="data/bfvp")
-    # parser.add_argument("--depth", type=int, default=16)  # depth of the formula
-    parser.add_argument("--max_depth", type=int, default=64)  # max depth of the formula
+    parser.add_argument("--depth", type=int, default=16)  # depth of the formula
     parser.add_argument("--train_size", type=int, default=100000)
     parser.add_argument("--test_size", type=int, default=10000)
     args = parser.parse_args()
     random.seed(2023)
 
-    depths = [2**i for i in range(3, int(math.log2(args.max_depth)) + 1)]
-    for d in depths:
-        base = os.path.join(args.data_dir, str(d))
-        build_dataset(d, args.train_size, args.test_size, base)
-        print(f"Generated data for depth {d} at {base}")
+    data_dir = os.path.join(args.data_dir, str(args.depth))
+    build_dataset(args.depth, args.train_size, args.test_size, data_dir)
+
+    # parser.add_argument("--max_depth", type=int, default=64)  # max depth of the formula
+    # depths = [2**i for i in range(3, int(math.log2(args.max_depth)) + 1)]
+    # for d in depths:
+    #    base = os.path.join(args.data_dir, str(d))
+    #    build_dataset(d, args.train_size, args.test_size, base)
+    #    print(f"Generated data for depth {d} at {base}")
