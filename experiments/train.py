@@ -66,7 +66,7 @@ def main():
         train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn
+        test_dataset, batch_size=args.batch_size if args.chain is False else 1, shuffle=False, collate_fn=collate_fn
     )
 
     max_length = args.input_size
@@ -147,13 +147,11 @@ def main():
                     inputs, y = input_ids.cuda(), y.long().cuda()
                     if args.chain:
                         max_new_tokens = (
-                            task.config["input_size"] * 3 + args.cot_length
-                            if args.cot_length
-                            else task.config["max_length"]
+                            args.input_size * 3 + args.cot_length if args.cot_length else task.config["max_length"]
                         )
                         idx = model.generate(inputs, top_k=1, max_new_tokens=max_new_tokens)
                         acc = task.accuracy_fn(idx, y).detach().cpu()
-                        print(f"Accuracy at step {i}: {acc.item()}", flush=True)
+                        # print(f"Accuracy at step {i}: {acc.item()}", flush=True)
                     else:
                         logits = model(inputs)
                         acc = task.accuracy_fn(logits, y).detach().cpu()

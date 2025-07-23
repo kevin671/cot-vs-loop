@@ -1,6 +1,6 @@
 from .nc1.arithmetic import ArithmeticExpressionDataset, ArithmeticExpressionTask
 from .nc1.bfvp import BooleanFormulaValueProblemDataset, BooleanFormulaValueProblemTask
-from .nc1.word import WordProblemDataset, WordProblemTask
+from .nc1.word import WordProblemDataset, WordProblemTask, WordProblemTaskChain
 from .nc2.path import ReachabilityDataset, ReachabilityTask
 from .nc2.strings import (
     EditDistanceTask,
@@ -8,13 +8,17 @@ from .nc2.strings import (
     LongestCommonSubsequenceTask,
     PairwiseAlignmentDataset,
 )
+from .p_complete.cvp import CircuitValueProblemDataset, CircuitValueProblemTask
 
 
 def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
     if args.task == "word":
-        task = WordProblemTask()
-        train_dataset = WordProblemDataset(task.config, split="train")
-        test_dataset = WordProblemDataset(task.config, split="test")
+        if chain:
+            task = WordProblemTaskChain(max_input_size=args.input_size, cot_length=cot_length)
+        else:
+            task = WordProblemTask()
+        train_dataset = WordProblemDataset(task.config, split="train", chain=chain)
+        test_dataset = WordProblemDataset(task.config, split="test", chain=chain)
     elif args.task == "path":
         task = ReachabilityTask(max_input_size=args.input_size)
         train_dataset = ReachabilityDataset(task.config, split="train")
@@ -41,7 +45,9 @@ def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
     elif args.task == "reg":
         pass
     elif args.task == "fixed_cfg":
-        pass
+        task = CircuitValueProblemTask()
+        train_dataset = CircuitValueProblemDataset(task.config, split="train")
+        test_dataset = CircuitValueProblemDataset(task.config, split="test")
     else:
         raise ValueError(f"Unknown task: {args.task}")
 

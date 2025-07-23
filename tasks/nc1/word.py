@@ -3,13 +3,14 @@ import csv
 import torch
 import torch.nn.functional as F
 
-from tasks.task import CurriculumDataset, GeneralizationTask
+from tasks.task import CurriculumDataset, GeneralizationTask, GeneralizationTaskChain
 
 
 class WordProblemDataset(CurriculumDataset):
-    def __init__(self, config, split="train"):
+    def __init__(self, config, split="train", chain: bool = False):
         super().__init__()
         self.config = config
+        self.chain = chain
         csv_path = config["csv_path"]
         if split == "test":
             csv_path = csv_path.replace(".csv", "_test.csv")
@@ -18,19 +19,46 @@ class WordProblemDataset(CurriculumDataset):
             for row in csv.DictReader(f):
                 inp = list(map(int, row["input"].split()))
                 tgt = list(map(int, row["target"].split()))
-                self.samples.append((inp, tgt))
+
+                if chain:
+                    if split == "train":
+                        eos_token_id = config["eos_token_id"]
+                        cot_len = config["cot_length"] or config["max_length"] + 1
+                        cot, ans = tgt[:-1], tgt[-1]
+                        total_len = len(cot)
+
+                        if total_len <= cot_len:
+                            sampled_cot = cot
+                        else:
+                            import numpy as np
+
+                            indices = np.linspace(0, total_len - 1, cot_len, dtype=int).tolist()
+                            sampled_cot = [cot[i] for i in indices]
+                        input_ids = inp + sampled_cot + [ans]
+                        label_ids = torch.tensor(input_ids[1:] + [eos_token_id], dtype=torch.long)
+                        label_ids[: len(inp) - 1] = self.config["ignore_index"]
+                        self.samples.append((input_ids, label_ids))
+                    else:
+                        label_id = tgt[-1]
+                        self.samples.append((inp, label_id))
+                else:
+                    self.samples.append((inp, tgt))
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        inp, tgt = self.samples[idx]
-        length = self.curriculum.sample_sequence_length() if self.curriculum else len(inp)
-        if length < len(inp):
-            inp = inp[:length]
-            tgt = tgt[:length]
-        # self.curriculum.step() if self.curriculum else None
-        return torch.tensor(inp, dtype=torch.long), torch.tensor(tgt, dtype=torch.long)
+        if self.chain:
+            inp, tgt = self.samples[idx]
+            return torch.tensor(inp, dtype=torch.long), torch.tensor(tgt, dtype=torch.long)
+        else:
+            inp, tgt = self.samples[idx]
+            length = self.curriculum.sample_sequence_length() if self.curriculum else len(inp)
+            if length < len(inp):
+                inp = inp[:length]
+                tgt = tgt[:length]
+            # self.curriculum.step() if self.curriculum else None
+            return torch.tensor(inp, dtype=torch.long), torch.tensor(tgt, dtype=torch.long)
 
 
 class WordProblemTask(GeneralizationTask):
@@ -82,27 +110,35 @@ class WordProblemTask(GeneralizationTask):
     }
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # last_logits = output[:, -1, :]
-        # last_target = target[:, -1]
-        # loss = F.cross_entropy(last_logits, last_target, ignore_index=-1)
-        # return loss
-        loss = F.cross_entropy(output.view(-1, output.size(-1)), target.view(-1), ignore_index=-1)
+        loss = F.cross_entropy(
+            output.view(-1, output.size(-1)), target.view(-1), ignore_index=self.config["ignore_index"]
+        )
         return loss
 
     def accuracy_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # last_logits = output[:, -1, :]  # (B, V)
-        # last_target = target[:, -1]  # (B,)
-        # pred = last_logits.argmax(dim=-1)  # (B,)
-        # return (pred == last_target).float().mean()  # scalar accuracy
         pred = output.argmax(dim=-1)  # (B, T)
         return (pred == target).float().mean(dim=0)
 
 
+class WordProblemTaskChain(GeneralizationTaskChain):
+    def __init__(self, max_input_size: int = 64, cot_length: int = None) -> None:
+        config = {
+            "name": "word_problem",
+            "csv_path": f"data/word_problem/S5_{max_input_size}.csv",
+            "max_length": max_input_size + 1,
+            "vocab_size": 121,
+            "ignore_index": -100,
+            "eos_token_id": 121,
+        }
+        config["cot_length"] = cot_length
+        self.config = config
+
+
 if __name__ == "__main__":
     # Example usage
-    task = WordProblemTask()
-    dataset = WordProblemDataset(task.config, split="test")
+    task = WordProblemTaskChain(max_input_size=16, cot_length=4)
+    dataset = WordProblemDataset(task.config, split="test", chain=True)
     for inp, tgt in dataset:
         print("Input:", inp.tolist())
         print("Target:", tgt.tolist())
-        break  # Just show the first sample
+        break
