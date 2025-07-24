@@ -51,7 +51,7 @@ def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
         test_dataset = PairwiseAlignmentDataset(task.config, split="test")
     elif args.task == "reg":
         pass
-    elif args.task == "fixed_cfg":
+    elif args.task == "cvp":
         task = CircuitValueProblemTask()
         train_dataset = CircuitValueProblemDataset(task.config, split="train")
         test_dataset = CircuitValueProblemDataset(task.config, split="test")
