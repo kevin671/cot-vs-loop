@@ -89,9 +89,10 @@ class GeometricIncreaseCurriculum(Curriculum):
         self.warmup_steps = warmup_steps
 
     def _steps_for_length(self, length: int) -> int:
-        ratio = max(1, length // self.L0)           # L / L0
-        k = max(1, int(math.log2(ratio)))           # log2(L/L0) (最小1)
-        return self.S0 * k
+        #ratio = max(1, length // self.L0)           # L / L0
+        #k = max(1, int(math.log2(ratio)))           # log2(L/L0) (最小1)
+        #return self.S0 * k
+        return self.S0
 
     def current_max_length(self) -> int:
         if self.global_step < self.warmup_steps:

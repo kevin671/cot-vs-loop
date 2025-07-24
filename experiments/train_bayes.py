@@ -48,16 +48,17 @@ def main():
     parser.add_argument("--weight_decay", type=float, default=0.01)
 
     parser.add_argument("--model", type=str, default="Looped", choices=["Looped", "GPT", "TMLT"])
-    parser.add_argument("--n_embd", type=int, default=512)
-    parser.add_argument("--n_head", type=int, default=8)
+    parser.add_argument("--n_embd", type=int, default=256)
+    parser.add_argument("--n_head", type=int, default=4)
     parser.add_argument("--n_layer", type=int, default=2)
     parser.add_argument("--n_loop", type=int, default=16)
     parser.add_argument("--is_causal", action="store_true")
 
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="./output")
-
+    parser.add_argument("--val_interval", type=int, default=10)
     parser.add_argument("--deterministic", action="store_true", default=False, help="Use deterministic sampling")
+    parser.add_argument("--chain", action="store_true")
 
     args = parser.parse_args()
     print(args)
@@ -72,8 +73,10 @@ def main():
     from tasks.sharp_p.bayes_net import BayesNetOnlineDataset, BayesNetTask
 
     task = BayesNetTask()
-    train_dataset = BayesNetOnlineDataset(task.config, split="train", deterministic=args.deterministic)
-    test_dataset = BayesNetOnlineDataset(task.config, split="test", deterministic=args.deterministic)
+    train_dataset = BayesNetOnlineDataset(
+        task.config, split="train", deterministic=args.deterministic, chain=args.chain
+    )
+    test_dataset = BayesNetOnlineDataset(task.config, split="test", deterministic=args.deterministic, chain=args.chain)
 
     print(task.config)
 
@@ -92,7 +95,7 @@ def main():
 
     optimizer, scheduler = set_optimizer_scheduler(model, args, steps_per_epoch=steps_per_epoch)
 
-    wandb.init(project="CoT-vs-Loop", config=args, name=f"{args.task}_{args.input_size}_{args.model}")
+    wandb.init(project="cotloop", config=args, name=f"{args.task}_{args.input_size}_{args.model}")
 
     for epoch in range(args.epoch):
         model.train()
@@ -115,7 +118,7 @@ def main():
 
         n_eval = 100
         n_loop_eval = args.n_loop  # task.config["num_nodes"]
-        if (epoch + 1) % 1 == 0:
+        if (epoch + 1) % args.val_interval == 0:
             model.eval()
             with torch.no_grad():
                 # total_acc = torch.tensor(0.0, device="cpu")

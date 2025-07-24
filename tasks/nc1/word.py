@@ -1,5 +1,6 @@
 import csv
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -23,15 +24,13 @@ class WordProblemDataset(CurriculumDataset):
                 if chain:
                     if split == "train":
                         eos_token_id = config["eos_token_id"]
-                        cot_len = config["cot_length"] or config["max_length"] + 1
+                        cot_len = config["cot_length"]
                         cot, ans = tgt[:-1], tgt[-1]
                         total_len = len(cot)
 
-                        if total_len <= cot_len:
+                        if cot_len is None:
                             sampled_cot = cot
                         else:
-                            import numpy as np
-
                             indices = np.linspace(0, total_len - 1, cot_len, dtype=int).tolist()
                             sampled_cot = [cot[i] for i in indices]
                         input_ids = inp + sampled_cot + [ans]
@@ -125,10 +124,10 @@ class WordProblemTaskChain(GeneralizationTaskChain):
         config = {
             "name": "word_problem",
             "csv_path": f"data/word_problem/S5_{max_input_size}.csv",
-            "max_length": max_input_size + 1,
+            "max_length": max_input_size * 2 + 1,
             "vocab_size": 121,
             "ignore_index": -100,
-            "eos_token_id": 121,
+            "eos_token_id": 120,
         }
         config["cot_length"] = cot_length
         self.config = config
@@ -136,8 +135,8 @@ class WordProblemTaskChain(GeneralizationTaskChain):
 
 if __name__ == "__main__":
     # Example usage
-    task = WordProblemTaskChain(max_input_size=16, cot_length=4)
-    dataset = WordProblemDataset(task.config, split="test", chain=True)
+    task = WordProblemTaskChain(max_input_size=256, cot_length=None)
+    dataset = WordProblemDataset(task.config, split="train", chain=True)
     for inp, tgt in dataset:
         print("Input:", inp.tolist())
         print("Target:", tgt.tolist())

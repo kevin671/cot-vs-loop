@@ -32,8 +32,8 @@ def main():
     parser.add_argument("--weight_decay", type=float, default=0.01)
     # Model parameters
     parser.add_argument("--model", type=str, default="Looped", choices=["Looped", "GPT", "TMLT"])
-    parser.add_argument("--n_embd", type=int, default=512)
-    parser.add_argument("--n_head", type=int, default=8)
+    parser.add_argument("--n_embd", type=int, default=256)
+    parser.add_argument("--n_head", type=int, default=4)
     parser.add_argument("--n_layer", type=int, default=2)
     parser.add_argument("--n_loop", type=int, default=16)
     parser.add_argument("--is_causal", action="store_true")
@@ -65,8 +65,12 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
+    if args.chain is False and args.task == "ed":
+        test_batch_size = 1
+    else:
+        test_batch_size = args.batch_size
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=args.batch_size if args.chain is False else 1, shuffle=False, collate_fn=collate_fn
+        test_dataset, batch_size=test_batch_size, shuffle=False, collate_fn=collate_fn
     )
 
     max_length = args.input_size
@@ -87,9 +91,13 @@ def main():
         )
     elif args.curriculum == "geometric":
         increase_factor = 2
+        if args.task == "arithmetic" or args.task == "path":
+            base_steps = 100 * len(train_loader)
+        else:
+            base_steps = 5 * len(train_loader) if args.task == "bfvp" else 20 * len(train_loader)
         curriculum = GeometricIncreaseCurriculum(
             initial_sequence_length=initial_len,
-            base_steps=1 * len(train_loader) if args.task == "bfvp" else 10 * len(train_loader),
+            base_steps=base_steps,
             increase_factor=increase_factor,
             sample_all_length=False,
             max_sequence_length=max_length,
@@ -139,16 +147,19 @@ def main():
             seq_len = curriculum.sample_sequence_length()
             print(f"Evaluating on test set with sequence length: {seq_len}")
             with torch.no_grad():
-                if args.task == "word":
+                if args.task == "word" and args.chain is False:
                     total_acc = torch.zeros(task.config["max_length"], device="cpu")
                 else:
                     total_acc = torch.tensor(0.0, device="cpu")
                 for i, (input_ids, y) in enumerate(tqdm(test_loader)):
                     inputs, y = input_ids.cuda(), y.long().cuda()
                     if args.chain:
-                        max_new_tokens = (
-                            args.input_size * 3 + args.cot_length if args.cot_length else task.config["max_length"]
-                        )
+                        if args.task == "ed":
+                            max_new_tokens = (
+                                args.input_size * 3 + args.cot_length if args.cot_length else task.config["max_length"]
+                            )
+                        elif args.task == "word":
+                            max_new_tokens = args.cot_length + 2 if args.cot_length else args.input_size + 2
                         idx = model.generate(inputs, top_k=1, max_new_tokens=max_new_tokens)
                         acc = task.accuracy_fn(idx, y).detach().cpu()
                         # print(f"Accuracy at step {i}: {acc.item()}", flush=True)

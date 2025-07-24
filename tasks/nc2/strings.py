@@ -58,7 +58,7 @@ class PairwiseAlignmentDataset(CurriculumDataset):
 
                         # systematic sampling
                         total_len = len(cot)
-                        if total_len < cot_len:
+                        if total_len <= cot_len:
                             sampled_cot = cot
                         else:
                             indices = [int(i * total_len / cot_len) for i in range(cot_len)]

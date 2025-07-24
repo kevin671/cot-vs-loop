@@ -1,4 +1,8 @@
-from .nc1.arithmetic import ArithmeticExpressionDataset, ArithmeticExpressionTask
+from .nc1.arithmetic import (
+    ArithmeticExpressionDataset,
+    ArithmeticExpressionTask,
+    ArithmeticExpressionTaskChain,
+)
 from .nc1.bfvp import BooleanFormulaValueProblemDataset, BooleanFormulaValueProblemTask
 from .nc1.word import WordProblemDataset, WordProblemTask, WordProblemTaskChain
 from .nc2.path import ReachabilityDataset, ReachabilityTask
@@ -25,10 +29,13 @@ def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
         test_dataset = ReachabilityDataset(task.config, split="test")
     elif args.task == "bfvp":
         task = BooleanFormulaValueProblemTask(max_input_size=args.input_size)
-        train_dataset = BooleanFormulaValueProblemDataset(task.config, split="train")  # TODO:
+        train_dataset = BooleanFormulaValueProblemDataset(task.config, split="train")
         test_dataset = BooleanFormulaValueProblemDataset(task.config, split="test")
     elif args.task == "arithmetic":
-        task = ArithmeticExpressionTask(max_input_size=args.input_size)
+        if chain:
+            task = ArithmeticExpressionTaskChain(max_input_size=args.input_size, cot_length=cot_length)
+        else:
+            task = ArithmeticExpressionTask(max_input_size=args.input_size)
         train_dataset = ArithmeticExpressionDataset(task.config, split="train")
         test_dataset = ArithmeticExpressionDataset(task.config, split="test")
     elif args.task == "ed":
