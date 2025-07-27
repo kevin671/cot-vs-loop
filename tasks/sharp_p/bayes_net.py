@@ -73,7 +73,7 @@ def ancestral_sample_det(G: nx.DiGraph, cpts, rng: random.Random) -> Dict[int, i
 
 
 class BayesNetOnlineDataset(IterableDataset):
-    def __init__(self, config, deterministic=False, split: str = "train", seed: int = 42):
+    def __init__(self, config, deterministic=False, split: str = "train", seed: int = 42, chain: bool = False):
         super().__init__()
         self.num_nodes = config["num_nodes"]
         self.num_edges = config["num_edges"]
@@ -94,6 +94,7 @@ class BayesNetOnlineDataset(IterableDataset):
         self.roots = [v for v in self.G.nodes if self.G.in_degree(v) == 0]
         self.non_root_indices = [i for i, v in enumerate(self.topo) if v not in self.roots]
         self.query_node = self.topo[-1]
+        self.chain = chain
 
         self._build_vocab()
         # print(self.cpts)
@@ -104,6 +105,7 @@ class BayesNetOnlineDataset(IterableDataset):
 
         add("<pad>")
         add("<mask>")
+        add("<eos>")
         add("0")
         add("1")
         for i in range(self.num_nodes):
@@ -116,55 +118,47 @@ class BayesNetOnlineDataset(IterableDataset):
         return [self.tok2id[t] for t in toks]
 
     def __iter__(self):
-        # MASK_PROB = 0.15
-        MASK_TOKEN = "<mask>"
-
         rng = random.Random(torch.initial_seed() % (2**32))
         while True:
             assign = self._sample_fn(self.G, self.cpts, rng)
-
             if self.mode == "train":
-                q_idx = rng.choice(self.non_root_indices)
-                q = self.topo[q_idx]
-                pa_q = set(self.G.predecessors(q))
+                if self.chain:
+                    # q_idx = rng.choice(self.non_root_indices)
+                    # q = self.topo[q_idx]
+                    # ctx = self.topo[: q_idx + 1]
 
-                tokens: list[str] = []
-                labels: list[int] = []
+                    tokens, labels = [], []
 
-                for node in self.topo:
-                    var_tok = f"{node}="
-                    if node == q:
-                        tokens.extend([var_tok, MASK_TOKEN])
-                        labels.extend([self.ignore_index, self.tok2id[str(assign[node])]])
-
-                    elif (node in self.roots) or (node in pa_q):
-                        tokens.extend([var_tok, str(assign[node])])
-                        labels.extend([self.ignore_index, self.ignore_index])
-
-                    else:
-                        tokens.extend([var_tok, MASK_TOKEN])
-                        labels.extend([self.ignore_index, self.ignore_index])
-                """
-                q_idx = rng.choice(self.non_root_indices)
-                q = self.topo[q_idx]
-                ctx = self.topo[: q_idx + 1]
-
-                tokens, labels = [], []
-
-                for node in ctx:
-                    var_tok = f"{node}="
-                    val_tok = str(assign[node])
-
-                    mask = node == q or (node not in self.roots and rng.random() < MASK_PROB)
-
-                    if mask:
-                        tokens.extend([var_tok, MASK_TOKEN])
-                        labels.extend([self.ignore_index, self.tok2id[val_tok]])
-                    else:
+                    for node in self.topo:
+                        var_tok = f"{node}="
+                        val_tok = str(assign[node])
                         tokens.extend([var_tok, val_tok])
-                        labels.extend([self.ignore_index, self.ignore_index])
-                """
+                        # labels.extend([self.tok2id[val_tok], self.ignore_index])
+                else:
+                    # MASK_PROB = 0.15
+                    MASK_TOKEN = "<mask>"
+                    q_idx = rng.choice(self.non_root_indices)
+                    q = self.topo[q_idx]
+                    pa_q = set(self.G.predecessors(q))
+
+                    tokens: list[str] = []
+                    labels: list[int] = []
+
+                    for node in self.topo:
+                        var_tok = f"{node}="
+                        if node == q:
+                            tokens.extend([var_tok, MASK_TOKEN])
+                            labels.extend([self.ignore_index, self.tok2id[str(assign[node])]])
+
+                        elif (node in self.roots) or (node in pa_q):
+                            tokens.extend([var_tok, str(assign[node])])
+                            labels.extend([self.ignore_index, self.ignore_index])
+
+                        else:
+                            tokens.extend([var_tok, MASK_TOKEN])
+                            labels.extend([self.ignore_index, self.ignore_index])
             else:
+                # TODO: 確率的な場合はCPTの値と比較する
                 # q = self.query_node
                 tokens, labels = [], []
                 for node in self.topo:
@@ -173,18 +167,30 @@ class BayesNetOnlineDataset(IterableDataset):
                         tokens.extend([var_tok, str(assign[node])])
                         labels.extend([self.ignore_index, self.ignore_index])
                     else:
-                        tokens.extend([var_tok, MASK_TOKEN])
-                        labels.extend([self.ignore_index, self.tok2id[str(assign[node])]])
+                        if self.chain:
+                            pass
+                        else:
+                            tokens.extend([var_tok, MASK_TOKEN])
+                            labels.extend([self.ignore_index, self.tok2id[str(assign[node])]])
 
             # print(tokens, labels)
             # ['0=', '0', '4=', '<mask>', '2=', '<mask>', '1=', '1', '3=', '0', '5=', '<mask>', '7=', '<mask>', '6=', '<mask>', '8=', '<mask>', '9=', '<mask>']
             # [-100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, -100, 4, -100, -100, -100, -100, -100, -100]
 
             input_ids = [self.tok2id[t] for t in tokens]
+            if self.chain:
+                labels = input_ids[1:] + [self.tok2id["<eos>"]]
+            # label_ids = [self.ignore_index if l == self.ignore_index else self.tok2id[l] for l in labels]
             # pad_len = self.max_len - len(input_ids)
 
             # input_ids.extend([self.pad_id] * pad_len)
             # labels.extend([self.ignore_index] * pad_len)
+
+            # For debug
+            n_roots = len(self.roots)
+            input_ids = input_ids[: 2 * (n_roots + 1)]
+            labels = labels[: 2 * (n_roots + 1)]
+
 
             yield torch.tensor(input_ids, dtype=torch.long), torch.tensor(labels, dtype=torch.long)
 
@@ -200,7 +206,7 @@ class BayesNetTask(GeneralizationTask):
         "max_length": num_nodes * 2,
         "ignore_index": -100,
     }
-    config["vocab_size"] = num_nodes + 4
+    config["vocab_size"] = num_nodes + 5
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         loss = F.cross_entropy(
@@ -235,7 +241,7 @@ if __name__ == "__main__":
     # Example usage
     task = BayesNetTask()
     # dataset = BayesNetOnlineDataset(task.config, split="test")
-    dataset = BayesNetOnlineDataset(task.config, deterministic=True, split="test")
+    dataset = BayesNetOnlineDataset(task.config, deterministic=False, split="train", chain=True)
     # print(f"Number of samples in {dataset.split} set: {len(dataset)}")
     for i, (input_ids, label) in enumerate(dataset):
         if i >= 200:  # Get only the first 5 samples for demonstration
