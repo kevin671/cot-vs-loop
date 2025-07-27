@@ -91,8 +91,10 @@ def main():
         )
     elif args.curriculum == "geometric":
         increase_factor = 2
-        if args.task == "arithmetic" or args.task == "path":
-            base_steps = 100 * len(train_loader)
+        if args.task == "arithmetic":
+            base_steps = 50 * len(train_loader)
+        elif args.task == "path":
+            base_steps = 50 * len(train_loader)
         else:
             base_steps = 5 * len(train_loader) if args.task == "bfvp" else 20 * len(train_loader)
         curriculum = GeometricIncreaseCurriculum(

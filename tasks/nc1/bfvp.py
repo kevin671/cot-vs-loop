@@ -49,15 +49,15 @@ class BooleanFormulaValueProblemDataset(CurriculumDataset):
 
 
 class BooleanFormulaValueProblemTask(GeneralizationTask):
-    def __init__(self, max_input_size=64):
+    def __init__(self, max_input_size=64, min_input_size=8):
         self.config = {
             "name": "boolean_formula_value_problem",
             "data_dir": "data/bfvp",  # "data/word_problem/S5_512.csv",  # Path to the CSV file with input-output pairs
             "vocab_size": 9,
-            "min_input_size": 8,
+            "max_input_size": max_input_size,
+            "min_input_size": min_input_size,
+            "max_length": max_input_size * 4 + 1,
         }
-        self.config["max_input_size"] = max_input_size
-        self.config["max_length"] = max_input_size * 4 + 1  # max length of the input sequence
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         last_logits = output[:, 0, :]  # (batch_size, vocab_size)
