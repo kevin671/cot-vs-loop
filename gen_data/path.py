@@ -49,6 +49,67 @@ def write_sample(path: str, vertices: list[str], edges: list[str], query: str, l
         f.write(line)
 
 
+# https://github.com/lacoco-lab/scratchpad_bounds/blob/main/Reachability/generalDAG_utils.py#L130
+def edges_to_scratchpad(edges, start: int, end: int):
+    scratchpad = [("N", start)]
+    scratchpad_idx = 0
+    visited = set()
+    while scratchpad_idx < len(scratchpad):
+        current_node = scratchpad[scratchpad_idx][1]
+        if current_node != "N" and current_node not in visited:
+            # list all edges starting in the current node
+            scratchpad += [(l, r) for l, r in edges if l == current_node] + [(current_node, "N")]
+
+            # without this the scratchpad would also work but it would slightly larger on average
+            visited.add(current_node)
+
+        # take the next edge in the scratchpad
+        scratchpad_idx += 1
+
+    # just searching if we've found the target node and trimming the scratchpad so that it's the end
+    end_idx = [i for i, (l, r) in enumerate(scratchpad) if r == end]
+    if end_idx:
+        end_idx = end_idx[0]
+        scratchpad = scratchpad[: end_idx + 1]
+
+    return scratchpad
+
+
+def generate_er_reachability_sample_with_scratchpad(n: int, p: float, seed: int = None):
+    if seed is not None:
+        random.seed(seed)
+
+    G = nx.erdos_renyi_graph(n, p, seed=seed)
+    s, t = random.sample(list(G.nodes()), 2)
+    tokens, reachable = encode_graph_for_transformer(G, s, t)
+
+    # prepare CoT-style scratchpad sequence
+    scratchpad_tuples = edges_to_scratchpad(list(G.edges()), start=s, end=t)
+    scratchpad = [f"{u},{v}" for u, v in scratchpad_tuples]
+
+    label = int(reachable)
+    return tokens, label, scratchpad
+
+
+def write_sample_with_scratchpad(
+    path: str, vertices: list[str], edges: list[str], query: str, label: int, scratchpad: list[str]
+):
+    line = (
+        " ".join(vertices)
+        + "\t"
+        + " ".join(edges)
+        + "\t"
+        + query
+        + "\t"
+        + " ".join(scratchpad)
+        + "\t"
+        + str(label)
+        + "\n"
+    )
+    with open(path, "a") as f:
+        f.write(line)
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--num_nodes", "--n", type=int, default=8, help="number of vertices in G(n,p)")
@@ -57,35 +118,62 @@ def main() -> None:
     p.add_argument("--test_size", type=int, default=1000, help="# test samples")
     p.add_argument("--data_dir", type=str, default="data/path", help="directory to drop {train,test}.txt")
     p.add_argument("--seed", type=int, default=42, help="global RNG seed (for reproducibility)")
+    p.add_argument("--make_chain", action="store_true", default=False)
 
     args = p.parse_args()
 
     if args.edge_prob is None:
         args.edge_prob = 1.7 / args.num_nodes
 
-    rng = random.Random(args.seed)
-    dpath = Path(args.data_dir, str(args.num_nodes))
-    dpath.mkdir(parents=True, exist_ok=True)
+    if args.make_chain:
+        rng = random.Random(args.seed)
+        dpath = Path(args.data_dir, str(args.num_nodes), "chain")
+        dpath.mkdir(parents=True, exist_ok=True)
 
-    for split, size in [("train", args.train_size), ("test", args.test_size)]:
-        out_file = dpath / f"{split}.txt"
-        # overwrite if the file already exists
-        out_file.write_text("")
+        for split, size in [("train", args.train_size), ("test", args.test_size)]:
+            out_file = dpath / f"{split}.txt"
+            # overwrite if the file already exists
+            out_file.write_text("")
 
-        for _ in tqdm.tqdm(range(size), desc=f"Generating {split}"):
-            # use an independent seed per sample for determinism yet diversity
-            sample_seed = rng.randint(0, 2**32 - 1)
+            for _ in tqdm.tqdm(range(size), desc=f"Generating {split}"):
+                sample_seed = rng.randint(0, 2**32 - 1)
 
-            tokens, label = generate_er_reachability_sample(args.num_nodes, args.edge_prob, seed=sample_seed)
+                tokens, label, scratchpad = generate_er_reachability_sample_with_scratchpad(
+                    args.num_nodes, args.edge_prob, seed=sample_seed
+                )
 
-            # split the token sequence back into vertices, edges, and query
-            vertices = [tok for tok in tokens if tok.startswith("v")]
-            query = tokens[-1]  # last token
-            edges = tokens[len(vertices) : -1]  # middle slice
+                vertices = [tok for tok in tokens if tok.startswith("v")]
+                query = tokens[-1]
+                edges = tokens[len(vertices) : -1]
 
-            write_sample(out_file, vertices, edges, query, label)
+                write_sample_with_scratchpad(out_file, vertices, edges, query, label, scratchpad)
 
-    print(f"Dataset written to {dpath}")
+        print(f"Dataset with scratchpad written to {dpath}")
+
+    else:
+        rng = random.Random(args.seed)
+        dpath = Path(args.data_dir, str(args.num_nodes))
+        dpath.mkdir(parents=True, exist_ok=True)
+
+        for split, size in [("train", args.train_size), ("test", args.test_size)]:
+            out_file = dpath / f"{split}.txt"
+            # overwrite if the file already exists
+            out_file.write_text("")
+
+            for _ in tqdm.tqdm(range(size), desc=f"Generating {split}"):
+                # use an independent seed per sample for determinism yet diversity
+                sample_seed = rng.randint(0, 2**32 - 1)
+
+                tokens, label = generate_er_reachability_sample(args.num_nodes, args.edge_prob, seed=sample_seed)
+
+                # split the token sequence back into vertices, edges, and query
+                vertices = [tok for tok in tokens if tok.startswith("v")]
+                query = tokens[-1]  # last token
+                edges = tokens[len(vertices) : -1]  # middle slice
+
+                write_sample(out_file, vertices, edges, query, label)
+
+        print(f"Dataset written to {dpath}")
 
 
 if __name__ == "__main__":

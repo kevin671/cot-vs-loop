@@ -65,7 +65,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
-    if args.chain and args.task == "ed":
+    if args.chain and args.task != "word":
         test_batch_size = 1
     else:
         test_batch_size = args.batch_size
@@ -92,9 +92,9 @@ def main():
     elif args.curriculum == "geometric":
         increase_factor = 2
         if args.task == "arithmetic":
-            base_steps = 200 * len(train_loader)
+            base_steps = 50 * len(train_loader)
         elif args.task == "path":
-            base_steps = 10 * len(train_loader)
+            base_steps = 100 * len(train_loader)
         else:
             base_steps = 5 * len(train_loader) if args.task == "bfvp" else 20 * len(train_loader)
         curriculum = GeometricIncreaseCurriculum(
@@ -145,6 +145,12 @@ def main():
                 wandb.log({"input_size": seq_len})
 
         if (epoch + 1) % args.val_interval == 0:
+            # Save the model
+            out_dir = os.path.join(args.output_dir, wandb.run.id)
+            os.makedirs(out_dir, exist_ok=True)
+            torch.save(model.state_dict(), f"{out_dir}/latest.pt")
+
+            # Evaluate on the test set
             model.eval()
             seq_len = curriculum.sample_sequence_length()
             print(f"Evaluating on test set with sequence length: {seq_len}")
@@ -156,12 +162,12 @@ def main():
                 for i, (input_ids, y) in enumerate(tqdm(test_loader)):
                     inputs, y = input_ids.cuda(), y.long().cuda()
                     if args.chain:
-                        if args.task == "ed":
+                        if args.task == "word":
+                            max_new_tokens = args.cot_length + 2 if args.cot_length else args.input_size + 2
+                        else:
                             max_new_tokens = (
                                 args.input_size * 3 + args.cot_length if args.cot_length else task.config["max_length"]
                             )
-                        elif args.task == "word":
-                            max_new_tokens = args.cot_length + 2 if args.cot_length else args.input_size + 2
                         idx = model.generate(inputs, top_k=1, max_new_tokens=max_new_tokens)
                         acc = task.accuracy_fn(idx, y).detach().cpu()
                         # print(f"Accuracy at step {i}: {acc.item()}", flush=True)
@@ -172,10 +178,6 @@ def main():
             avg_acc = total_acc / len(test_loader)
             wandb.log({"test_accuracy": avg_acc})
             print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
-
-            out_dir = os.path.join(args.output_dir, wandb.run.id)
-            os.makedirs(out_dir, exist_ok=True)
-            torch.save(model.state_dict(), f"{out_dir}/latest.pt")
 
 
 if __name__ == "__main__":

@@ -37,9 +37,8 @@ class ArithmeticExpressionDataset(CurriculumDataset):
 
                 if chain:
                     eq_pos = tokens.index("=")
+                    inp = tokens[: eq_pos + 1]
                     if split == "train":
-                        eq_pos = tokens.index("=")
-                        inp = tokens[: eq_pos + 1]
                         cot, ans = tokens[eq_pos + 1 : -1], tokens[-1]
                         cot_len = config["cot_length"]
                         total_len = len(cot)
@@ -124,13 +123,13 @@ class ArithmeticExpressionTaskChain(GeneralizationTaskChain):
             "ignore_index": -100,
             "eos_token_id": 2,
         }
-        config["max_length"] = max_input_size * (max_input_size + 1) / 2 * 4 + 10
+        config["max_length"] = max_input_size * (max_input_size + 1) // 2 * 4 + 10
         config["cot_length"] = cot_length
         self.config = config
 
 
 if __name__ == "__main__":
-    task = ArithmeticExpressionTaskChain(max_input_size=4, cot_length=4)
+    task = ArithmeticExpressionTaskChain(max_input_size=4)  # , cot_length=4)
     dataset = ArithmeticExpressionDataset(task.config, split="train", chain=True)
     for i in range(len(dataset)):
         inp, tgt = dataset[i]

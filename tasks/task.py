@@ -2,6 +2,7 @@ import abc
 
 import torch
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 
 from experiments.curriculum import Curriculum
@@ -42,3 +43,17 @@ class GeneralizationTaskChain(GeneralizationTask):
         final_tgts = target
         accuracy = (final_preds == final_tgts).float().mean()
         return accuracy
+
+    @staticmethod
+    def collate_fn(batch):
+        PAD_ID = 0
+        IGNORE_ID = -100
+        seqs, labels = zip(*batch)
+        padded_inp = pad_sequence(seqs, batch_first=True, padding_value=PAD_ID)  # (B, L_max)
+
+        if isinstance(labels[0], torch.Tensor) and labels[0].dim() == 0:
+            padded_tgt = torch.stack(labels)
+        else:
+            padded_tgt = pad_sequence(labels, batch_first=True, padding_value=IGNORE_ID)
+
+        return padded_inp, padded_tgt
