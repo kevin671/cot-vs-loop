@@ -14,21 +14,29 @@ class ReachabilityDataset(CurriculumDataset):
         super().__init__()
         self.config = config
 
-        def build_fixed_vocab(max_input_size: int) -> Dict[str, int]:
-            tok2id: Dict[str, int] = {"<pad>": 0, "TRUE": 1, "FALSE": 2}
-            if chain:
-                tok2id["N"] = 3
-                tok2id["<eos>"] = 4
+        if chain:
 
-            # vertices
-            for i in range(max_input_size):
-                tok2id[f"v{i}"] = len(tok2id)
-            # ordered pairs
-            for i in range(max_input_size):
-                for j in range(max_input_size):
-                    if i != j:
-                        tok2id[f"{i},{j}"] = len(tok2id)
-            return tok2id
+            def build_fixed_vocab(max_input_size: int) -> Dict[str, int]:
+                tok2id: Dict[str, int] = {"<pad>": 0, "TRUE": 1, "FALSE": 2, "N": 3, "<eos>": 4, "|": 5}
+                # vertices
+                for i in range(max_input_size):
+                    tok2id[i] = len(tok2id)
+                return tok2id
+
+        else:
+
+            def build_fixed_vocab(max_input_size: int) -> Dict[str, int]:
+                tok2id: Dict[str, int] = {"<pad>": 0, "TRUE": 1, "FALSE": 2}
+
+                # vertices
+                for i in range(max_input_size):
+                    tok2id[f"v{i}"] = len(tok2id)
+                # ordered pairs
+                for i in range(max_input_size):
+                    for j in range(max_input_size):
+                        if i != j:
+                            tok2id[f"{i},{j}"] = len(tok2id)
+                return tok2id
 
         max_input_size = config["max_input_size"]
         self.max_input_size = max_input_size
@@ -47,19 +55,23 @@ class ReachabilityDataset(CurriculumDataset):
             with file_path.open() as f:
                 for line in f:
                     if chain:
-                        verts, edges, query, cot, label = line.rstrip().split("\t")
+                        _, edges, query, cot, label = line.rstrip().split("\t")
+                        # edges = [int(n) for pair in edges.split() for n in pair.split(",")]
+                        query = [int(n) for n in query.split(",")]
+                        edges = edges.replace(" ", ",|,").split(",")  # if edges else []
+                        edges = [int(t) if t != "|" else "|" for t in edges]
 
                         if split == "train":
                             cot_len = config["cot_length"]
-                            cot_raw = cot.split()
-                            cot_tokens = []
-                            for _edge in cot_raw:
-                                # cot_tokens.extend(_trace.split(","))
-                                for node in _edge.split(","):
-                                    if node.isdigit():
-                                        cot_tokens.append(f"v{node}")
-                                    else:
-                                        cot_tokens.append(node)  # "N"
+                            # cot_raw = cot.split()
+                            cot_tokens = [int(n) if n.isdigit() else n for pair in cot.split() for n in pair.split(",")]
+                            # cot_tokens = []
+                            # for _edge in cot_raw:
+                            #    for node in _edge.split(","):
+                            #        if node.isdigit():
+                            #            cot_tokens.append(f"v{node}")
+                            #        else:
+                            #            cot_tokens.append(node)  # "N"
 
                             total_len = len(cot_tokens)
                             if cot_len is None:
@@ -70,7 +82,7 @@ class ReachabilityDataset(CurriculumDataset):
                                 indices = np.linspace(0, total_len - 1, cot_len, dtype=int).tolist()
                                 sampled_cot = [cot_tokens[i] for i in indices]
 
-                            inp = verts.split() + edges.split() + [query]
+                            inp = edges + ["|"] + query
                             tokens = inp + sampled_cot  # + [label]
                             input_ids = [self.token2id[tok] for tok in tokens] + [
                                 int(label) + 1
@@ -80,7 +92,7 @@ class ReachabilityDataset(CurriculumDataset):
                             self.samples[d].append((torch.tensor(input_ids, dtype=torch.long), label_ids))
 
                         else:
-                            tokens = verts.split() + edges.split() + [query]
+                            tokens = edges + ["|"] + query
                             ids = [self.token2id[tok] for tok in tokens]
                             self.samples[d].append((ids, int(label) + 1))
                     else:
@@ -139,13 +151,55 @@ class ReachabilityTaskChain(GeneralizationTaskChain):
             "data_dir": "data/path",
             "max_input_size": max_n,
             "min_input_size": max_n,
-            "vocab_size": max_n + max_n * (max_n - 1) + 4 + 2,  # nodes + edges + <pad> / N / <eos> + labels
+            "vocab_size": max_n + 5 + 2,  # nodes +  <pad> / N / <eos> / "|" + labels
             "eos_token_id": 4,  # <eos>
             "ignore_index": -100,
         }
-        config["max_length"] = max_n + max_n * (max_n - 1) + 2  # not strictly but practically sufficient
+        config["max_length"] = max_n * max_n # not strictly but practically sufficient
         config["cot_length"] = cot_length
         self.config = config
+
+    """
+    def accuracy_fn(self, output_idx: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        eos_token_id = self.config["eos_token_id"]
+        batch_size, seq_len = output_idx.shape
+
+        # tok2id: Dict[str, int] = {"<pad>": 0, "TRUE": 1, "FALSE": 2, "N": 3, "<eos>": 4, "|": 5}
+        # vertices
+        # for i in range(self.config["max_input_size"]):
+        #    tok2id[i] = len(tok2id)
+
+        # id2tok = {v: k for k, v in tok2id.items()}
+        id2tok = {0: "<pad>", 1: "TRUE", 2: "FALSE", 3: "N", 4: "<eos>", 5: "|"}
+        for i in range(self.config["max_input_size"]):
+            id2tok[i + 6] = str(i)
+        id2tok[-100] = str(-100)
+
+        output_strings = []
+        for seq in output_idx.tolist():
+            tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
+            output_strings.append(" ".join(tokens))
+        for i, s in enumerate(output_strings):
+            print(f"input [{i}] {s}", flush=True)
+
+        # target_strings = []
+        # for seq in target.tolist():
+        #    tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
+        #    target_strings.append(" ".join(tokens))
+        # for i, s in enumerate(target_strings):
+        #    print(f"tgt [{i}] {s}", flush=True)
+        # print(target.tolist(), flush=True)
+
+        eos_mask = output_idx == eos_token_id
+        first_eos_idx = eos_mask.float().cumsum(dim=1).eq(1).float().argmax(dim=1)
+        pred_idx = (first_eos_idx - 1).clamp(min=0)
+
+        final_preds = output_idx[torch.arange(batch_size), pred_idx]
+        final_tgts = target
+
+        accuracy = (final_preds == final_tgts).float().mean()
+        return accuracy
+    """
 
 
 if __name__ == "__main__":
@@ -154,5 +208,5 @@ if __name__ == "__main__":
     for i in range(5):
         inp, tgt = dataset[i]
         print(f"Input: {inp.tolist()}, Target: {tgt.tolist()}")
-        print(len(inp), len(tgt))
+        # print(len(inp), len(tgt))
         # Input: [21, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 21, 31, 37, 43], Target: 2

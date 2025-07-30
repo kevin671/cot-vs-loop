@@ -67,6 +67,7 @@ def main():
     )
     if args.chain and args.task != "word":
         test_batch_size = 1
+        test_dataset = torch.utils.data.Subset(test_dataset, range(1000))
     else:
         test_batch_size = args.batch_size
     test_loader = torch.utils.data.DataLoader(
@@ -92,7 +93,7 @@ def main():
     elif args.curriculum == "geometric":
         increase_factor = 2
         if args.task == "arithmetic":
-            base_steps = 50 * len(train_loader)
+            base_steps = 100 * len(train_loader)
         elif args.task == "path":
             base_steps = 100 * len(train_loader)
         else:
@@ -109,7 +110,7 @@ def main():
         raise ValueError(f"Unknown curriculum: {args.curriculum}")
 
     train_dataset.set_curriculum(curriculum)
-    if args.task != "word":
+    if args.task != "word" and not args.chain:
         test_dataset.set_curriculum(curriculum)
 
     # Model
@@ -170,7 +171,7 @@ def main():
                             )
                         idx = model.generate(inputs, top_k=1, max_new_tokens=max_new_tokens)
                         acc = task.accuracy_fn(idx, y).detach().cpu()
-                        # print(f"Accuracy at step {i}: {acc.item()}", flush=True)
+                        print(f"Accuracy at step {i}: {acc.item()}", flush=True)
                     else:
                         logits = model(inputs)
                         acc = task.accuracy_fn(logits, y).detach().cpu()

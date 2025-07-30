@@ -58,7 +58,9 @@ def edges_to_scratchpad(edges, start: int, end: int):
         current_node = scratchpad[scratchpad_idx][1]
         if current_node != "N" and current_node not in visited:
             # list all edges starting in the current node
-            scratchpad += [(l, r) for l, r in edges if l == current_node] + [(current_node, "N")]
+            scratchpad += [
+                (u, v) if u == current_node else (v, u) for u, v in edges if u == current_node or v == current_node
+            ] + [(current_node, "N")]
 
             # without this the scratchpad would also work but it would slightly larger on average
             visited.add(current_node)
