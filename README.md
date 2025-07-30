@@ -35,7 +35,7 @@ python -m experiments.train --task word --input_size 256 --model Looped --n_laye
 
 Dataset generation
 ```shell
-python gen_data/arithmetic.py --max_depth 64 --train_size 1000000 --test_size 100000 --number_range 11 --under
+python gen_data/arithmetic.py --max_depth 64 --train_size 10000000 --test_size 100000 --number_range 11 --under # 1M samples
 python gen_data/path.py --num_nodes 32 --train_size 1000000 --test_size 100000 --data_dir data/path --seed 42
 ```
 
