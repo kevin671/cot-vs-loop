@@ -17,9 +17,7 @@ bash scripts/train.sh # train_chain.sh
 ```
 
 ### NC1
-- **Word Problem**
-
-- **Arithmetic Expression**
+- Word Problem
 
 Dataset generation
 ```shell
@@ -32,8 +30,8 @@ python -m experiments.train --task word --input_size 256 --model Looped --n_laye
 ```
 
 ### TC1
-- **Arithmetic Expression**
-- **Reachability**
+- Arithmetic Expression
+- Reachability
 
 Dataset generation
 ```shell
@@ -48,8 +46,8 @@ python -m experiments.train --task path --input_size 32 --model Looped --is_caus
 ```
 
 ### NC2
-- **Context-free Grammar Recognition** 
-- Pairwise Sequence Alignment (Longest Common Subsequence, **Edit Distnace**)
+- Context-free Grammar Recognition
+- Pairwise Sequence Alignment (Longest Common Subsequence, Edit Distnace)
 
 Dataset generation
 ```shell
