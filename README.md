@@ -13,60 +13,60 @@ pip install -r requirements.txt
 
 ```shell
 conda activate cotloop
-python experiments/train.py
+bash scripts/train.sh # train_chain.sh
 ```
 
 ### NC1
-- Word Problem
-- Boolean Formula
+- **Word Problem**
+
 - **Arithmetic Expression**
 
 Dataset generation
 ```shell
 python gen_data/word.py --group=S5 --k=256 --data_dir=data/word_problem --samples=1000000 --overwrite
-python gen_data/bfvp.py --max_depth 64 --data_dir=data/bfvp --train_size 1000000 --test_size 1000
-python gen_data/arithmetic.py --max_depth 64 --train_size 1000000 --test_size 1000 --number_range 11 --under
 ```
 
 Training
 ```shell
-python -m experiments.train --task word --input_length 256 --model Looped --n_layer 2 --n_loop 8 --is_causal --epoch 1000
+python -m experiments.train --task word --input_size 256 --model Looped --n_layer 2 --n_loop 8 --is_causal --epoch 1000
 ```
-use --is_causal only for word problem
+
+### TC1
+- **Arithmetic Expression**
+- **Reachability**
+
+Dataset generation
+```shell
+python gen_data/arithmetic.py --max_depth 64 --train_size 1000000 --test_size 100000 --number_range 11 --under
+python gen_data/path.py --num_nodes 32 --train_size 1000000 --test_size 100000 --data_dir data/path --seed 42
+```
+
+Training
+```shell
+python -m experiments.train --task arithmetic --input_size 32 --model Looped --n_loop 8 --epoch 1000
+python -m experiments.train --task path --input_size 32 --model Looped --is_causal--n_loop 8 --epoch 1000
+```
 
 ### NC2
-- Reachability
-- hoge
-- hoge
-- **Topological Sort**
-- Regular Expression Matching
-- Fixed Context-Free-Grammar Membership Testing 
+- **Context-free Grammar Recognition** 
 - Pairwise Sequence Alignment (Longest Common Subsequence, **Edit Distnace**)
 
 Dataset generation
 ```shell
-python gen_data/path.py --num_nodes 8 --train_size 1000000 --test_size 1000 --data_dir data/path --seed 42
-
-python gen_data/strings.py --train_size 1000000 --test_size 1000 --data_dir data/ed --length 16
-
-python gen_data/strings.py --train_size 1000000 --test_size 1000 --data_dir data/lcs --length 16 --insert_cost 0 --delete_cost 0 --replace_cost 0 --match_cost 1 --objective max
+python gen_data/cfg.py
+python gen_data/strings.py --train_size 1000000 --test_size 100000 --data_dir data/ed --length 16
+python gen_data/strings.py --train_size 1000000 --test_size 100000 --data_dir data/lcs --length 16 --insert_cost 0 --delete_cost 0 --replace_cost 0 --match_cost 1 --objective max
 ```
 
 Training
 ```shell
-python -m experiments.train --task path --input_length 8 --model Looped --n_layer 2 --n_loop 8 --epoch 1000
-python -m experiments.train --task path --input_length 8 --model Looped --n_layer 2 --is_causal--n_loop 8 --epoch 1000  
+python -m experiments.train --task cfg --input_size 32
+python -m experiments.train --task lcs --input_size 64 --model TMLT --n_layer 1 --n_loop 16 --epoch 1000
+python -m experiments.train --task ed --input_size 32 --model TMLT --n_layer 1 --is_causal--n_loop 8 --epoch 1000 
 ```
 
-### P-complete
-- Circuit Value Problem
-- Iterated Mod 
-- Unit Resolution
-
 ### #P
-- Bayesian ?
-Approximate inference in Bayesian networks.
-Forward inference by ancestor sampling.
+- Probabilistic Inference in Bayesian network
 
 ```shell
 python gen_data/bayes_net.py

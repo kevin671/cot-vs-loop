@@ -1,12 +1,12 @@
 .venv
-*.sh.*
+*.sh.o*
+scripts_miyabi/
 *.d*
 __pycache__
 *.bin
 downloads/
 wandb/
 out/
-*.sh
 data/
 output/
 binary/unigen
