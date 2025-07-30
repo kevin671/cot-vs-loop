@@ -65,7 +65,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
-    if args.chain is False and args.task == "ed":
+    if args.chain and args.task == "ed":
         test_batch_size = 1
     else:
         test_batch_size = args.batch_size
@@ -92,9 +92,9 @@ def main():
     elif args.curriculum == "geometric":
         increase_factor = 2
         if args.task == "arithmetic":
-            base_steps = 50 * len(train_loader)
+            base_steps = 200 * len(train_loader)
         elif args.task == "path":
-            base_steps = 50 * len(train_loader)
+            base_steps = 10 * len(train_loader)
         else:
             base_steps = 5 * len(train_loader) if args.task == "bfvp" else 20 * len(train_loader)
         curriculum = GeometricIncreaseCurriculum(

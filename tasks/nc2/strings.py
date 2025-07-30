@@ -25,6 +25,8 @@ class PairwiseAlignmentDataset(CurriculumDataset):
 
         dictionary = build_fixed_vocab(config)
 
+        max_examples = 1000000  # 1005000
+
         if chain:
             path = Path(config["data_dir"]) / f"{config['max_input_size']}/chain/{split}_data.txt"
             with open(path) as f:
@@ -38,6 +40,9 @@ class PairwiseAlignmentDataset(CurriculumDataset):
                 path = f"{data_dir}/{d}/decoder/{split}_data.txt"
                 with open(path) as f:
                     lines = [line.split() for line in f.read().splitlines()]
+                if len(lines) > max_examples:
+                    lines = lines[:max_examples]
+
                 raw[d] = lines
                 d *= 2
 

@@ -20,9 +20,9 @@ class DiTBlock(nn.Module):
         self.mlp = MLP(config)
         self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(config.n_embd, 6 * config.n_embd, bias=True))
 
-    def forward(self, x, c):
+    def forward(self, x, c, attn_mask=None):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
-        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
+        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), attn_mask=attn_mask)
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
 
@@ -32,6 +32,11 @@ class TimeModulatedLoopedTF(nn.Module):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
+
+        self.pad_token_id = 0
+        if config.is_causal is False:
+            print("Warning: LoopedTF is not causal, using attn_mask for padding tokens.")
+
         self.config = config
         print(config)
 
@@ -45,7 +50,7 @@ class TimeModulatedLoopedTF(nn.Module):
             )
         )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.transformer.wte.weight = self.lm_head.weight
+        # self.transformer.wte.weight = self.lm_head.weight
 
         self.timestep_embedder = TimestepEmbedder(config.n_embd)
 
@@ -64,16 +69,24 @@ class TimeModulatedLoopedTF(nn.Module):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size
+
+        if self.config.is_causal:
+            # causal mask: no attention to future tokens
+            attn_mask = None
+        else:
+            attn_mask = idx != self.pad_token_id  # shape (b, t)
+            attn_mask = attn_mask[:, None, None, :].to(device)
+
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
 
         tok_emb = self.transformer.wte(idx)
-        x = self.transformer.drop(tok_emb)
-        for step in range(self.config.n_loop):
-            t_emb = self.timestep_embedder(torch.full((b,), step, dtype=torch.long, device=device))
+        pos_emb = self.transformer.wpe(pos)
+        x = self.transformer.drop(tok_emb + pos_emb)
+        for t in range(self.config.n_loop):
+            t_emb = self.timestep_embedder(torch.full((b,), t, dtype=torch.long, device=device))
             for block in self.transformer.h:
-                x = block(x, t_emb)
+                x = block(x, t_emb, attn_mask)
         x = self.transformer.ln_f(x)
-
         logits = self.lm_head(x)
 
         return logits

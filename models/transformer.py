@@ -262,7 +262,7 @@ class LoopedTF(nn.Module):
 
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
 
-        pred_list = []  # for storing predictions at each loop if n_loop is not None
+        # pred_list = []  # for storing predictions at each loop if n_loop is not None
         tok_emb = self.transformer.wte(idx)
         x = self.transformer.drop(tok_emb)
         for step in range(self.config.n_loop if n_loop is None else n_loop):
@@ -272,13 +272,12 @@ class LoopedTF(nn.Module):
             for block in self.transformer.h:
                 x = block(x, attn_mask)
 
-            if n_loop is not None:
-                pred_list.append(self.lm_head(self.transformer.ln_f(x)))
+            # if n_loop is not None:
+            #    pred_list.append(self.lm_head(self.transformer.ln_f(x)))
 
-        if n_loop is not None:
-            return torch.stack(pred_list, dim=0)
-
-        else:
+            # if n_loop is not None:
+            #    return torch.stack(pred_list, dim=0)
+            # else:
             x = self.transformer.ln_f(x)
             logits = self.lm_head(x)
 
