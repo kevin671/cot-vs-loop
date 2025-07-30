@@ -75,4 +75,4 @@ python experiments/train.py --task bayes_net --model GPT --n_embd 256 --n_head 4
 - [Towards Revealing the Mystery behind Chain of Thought: a Theoretical Perspective (NeurIPS 2023)](https://github.com/guyuntian/CoT_benchmark)
 - [Neural Networks and the Chomsky Hierarchy (ICLR 2023)](https://github.com/google-deepmind/neural_networks_chomsky_hierarchy/tree/main)
 - [The Illusion of State in State-Space Models (ICML 2024)](https://github.com/jopetty/word-problem)
-- [Progressive distillation induces an implicit curriculum (ICLR 2025)](https://github.com/abhishekpanigrahi1996/ProgressiveDistillation)
+- [Physics of Language Models: Part 1, Learning Hierarchical Language Structures](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5250639)
