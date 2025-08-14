@@ -1,18 +1,19 @@
-from .nc1.arithmetic import (
+from .arithmetic import (
     ArithmeticExpressionDataset,
     ArithmeticExpressionTask,
     ArithmeticExpressionTaskChain,
 )
-from .nc1.bfvp import BooleanFormulaValueProblemDataset, BooleanFormulaValueProblemTask
-from .nc1.word import WordProblemDataset, WordProblemTask, WordProblemTaskChain
-from .nc2.path import ReachabilityDataset, ReachabilityTask, ReachabilityTaskChain
-from .nc2.strings import (
+from .bfvp import BooleanFormulaValueProblemDataset, BooleanFormulaValueProblemTask
+from .path import ReachabilityDataset, ReachabilityTask, ReachabilityTaskChain
+from .strings import (
     EditDistanceTask,
     EditDistanceTaskChain,
     LongestCommonSubsequenceTask,
     PairwiseAlignmentDataset,
 )
-from .p_complete.cvp import CircuitValueProblemDataset, CircuitValueProblemTask
+from .word import WordProblemDataset, WordProblemTask, WordProblemTaskChain
+
+# from .p_complete.cvp import CircuitValueProblemDataset, CircuitValueProblemTask
 
 
 def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
@@ -57,9 +58,7 @@ def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
     elif args.task == "cfg":
         pass
     elif args.task == "cvp":
-        task = CircuitValueProblemTask()
-        train_dataset = CircuitValueProblemDataset(task.config, split="train")
-        test_dataset = CircuitValueProblemDataset(task.config, split="test")
+        pass
     else:
         raise ValueError(f"Unknown task: {args.task}")
 

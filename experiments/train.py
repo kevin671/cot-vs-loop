@@ -110,7 +110,7 @@ def main():
     elif args.curriculum == "adaptive":
         curriculum = AdaptiveCurriculum(
             init_input_size=initial_len,
-            threshold=0.8,  # 0.9,
+            threshold=0.85,  # 0.9,
             increase_amount=4,  # TODO: make this configurable
         )
     else:

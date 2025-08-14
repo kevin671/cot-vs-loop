@@ -100,7 +100,8 @@ class ReachabilityDataset(CurriculumDataset):
                         tokens = [query] + verts.split() + edges.split()
                         ids = [self.token2id[tok] for tok in tokens]
                         self.samples[d].append((ids, int(label) + 1))  # label: 1 for TRUE, 2 for FALSE
-            d *= 2
+            # d *= 2
+            d += 4
 
     def __len__(self) -> int:
         return len(self.samples[self.max_input_size])
@@ -155,7 +156,7 @@ class ReachabilityTaskChain(GeneralizationTaskChain):
             "eos_token_id": 4,  # <eos>
             "ignore_index": -100,
         }
-        config["max_length"] = max_n * max_n # not strictly but practically sufficient
+        config["max_length"] = max_n * max_n  # not strictly but practically sufficient
         config["cot_length"] = cot_length
         self.config = config
 
