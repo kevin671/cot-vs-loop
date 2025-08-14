@@ -11,6 +11,7 @@ from models import build_model
 from tasks import get_task_and_datasets
 
 from .curriculum import (
+    AdaptiveCurriculum,
     FixedLengthCurriculum,
     GeometricIncreaseCurriculum,
     RegularIncreaseCurriculum,
@@ -47,7 +48,7 @@ def main():
         "--curriculum",
         type=str,
         default="fixed_length",
-        choices=["fixed_length", "geometric", "regular"],
+        choices=["fixed_length", "geometric", "regular", "adaptive"],
     )
 
     args = parser.parse_args()
@@ -84,7 +85,7 @@ def main():
         n_increments = math.ceil((max_length - initial_len) / increase_amount) + 1
         increase_frequency = max(1, total_steps // n_increments)
         curriculum = RegularIncreaseCurriculum(
-            initial_sequence_length=initial_len,
+            init_input_size=initial_len,
             increase_frequency=increase_frequency,
             increase_amount=increase_amount,
             sample_all_length=False,
@@ -93,18 +94,24 @@ def main():
     elif args.curriculum == "geometric":
         increase_factor = 2
         if args.task == "arithmetic":
-            base_steps = 100 * len(train_loader)
+            base_steps = 500 * len(train_loader)  # 500 * len(train_loader)
         elif args.task == "path":
             base_steps = 100 * len(train_loader)
         else:
             base_steps = 5 * len(train_loader) if args.task == "bfvp" else 20 * len(train_loader)
         curriculum = GeometricIncreaseCurriculum(
-            initial_sequence_length=initial_len,
+            init_input_size=initial_len,
             base_steps=base_steps,
             increase_factor=increase_factor,
             sample_all_length=False,
             max_sequence_length=max_length,
             warmup_steps=args.warmup * len(train_loader),
+        )
+    elif args.curriculum == "adaptive":
+        curriculum = AdaptiveCurriculum(
+            init_input_size=initial_len,
+            threshold=0.8,  # 0.9,
+            increase_amount=4,  # TODO: make this configurable
         )
     else:
         raise ValueError(f"Unknown curriculum: {args.curriculum}")
@@ -177,6 +184,10 @@ def main():
                         acc = task.accuracy_fn(logits, y).detach().cpu()
                     total_acc += acc
             avg_acc = total_acc / len(test_loader)
+
+            if args.curriculum == "adaptive":
+                curriculum.update(avg_acc.item())
+
             wandb.log({"test_accuracy": avg_acc})
             print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
 

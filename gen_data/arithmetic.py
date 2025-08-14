@@ -115,50 +115,60 @@ def build_dataset(
     depth: int, train_size: int, test_size: int, out_dir: str, fname: str = "arithmetic", make_chain: bool = False
 ):
     os.makedirs(out_dir, exist_ok=True)
-    train_set, test_set = set(), set()
 
-    while len(train_set) < train_size:
-        train_set.add(tuple(get(depth)))
+    train_path = os.path.join(out_dir, "train_data.txt")
+    test_path = os.path.join(out_dir, "test_data.txt")
 
-    while len(test_set) < test_size:
-        h = tuple(get(depth))
-        if h not in train_set:
-            test_set.add(h)
+    train_set = set()
 
-    def dump(fname, data, history_only=False):
-        with open(os.path.join(out_dir, fname), "w") as f:
-            for hist in data:
-                for tok in hist:
-                    print(tok, end=" ", file=f)
-                    if not history_only and tok == "=":
-                        break
-                print("" if history_only else hist[-1], file=f)
+    with open(train_path, "w") as f_train:
+        while len(train_set) < train_size:
+            sample = tuple(get(depth))
+            if sample not in train_set:
+                train_set.add(sample)
+                write_example(f_train, sample, history_only=make_chain)
 
-    dump("train_data.txt", train_set, history_only=make_chain)
-    dump("test_data.txt", test_set)
+    with open(test_path, "w") as f_test:
+        written = 0
+        while written < test_size:
+            sample = tuple(get(depth))
+            if sample not in train_set:
+                write_example(f_test, sample, history_only=False)
+                written += 1
+
+
+def write_example(f, tokens, history_only=False):
+    for tok in tokens:
+        print(tok, end=" ", file=f)
+        if not history_only and tok == "=":
+            break
+    print("" if history_only else tokens[-1], file=f)
 
 
 if __name__ == "__main__":
+    min_depth = 8
     base_dir = args.data_dir
     if args.make_chain:
         if args.under:
-            d = 4
+            d = min_depth
             while d <= args.max_depth:
                 subdir = os.path.join(base_dir, str(d), "chain")
                 build_dataset(d, int(args.train_size), int(args.test_size), subdir, make_chain=True)
                 print(f"Dataset for length {d} written to: {subdir}")
-                d *= 2
+                # d *= 2
+                d += 4
         else:
             subdir = os.path.join(base_dir, str(args.max_depth), "chain")
             build_dataset(args.max_depth, int(args.train_size), int(args.test_size), subdir, make_chain=True)
     else:
         if args.under:
-            d = 4
+            d = min_depth
             while d <= args.max_depth:
                 subdir = os.path.join(base_dir, str(d), "decoder")
                 build_dataset(d, int(args.train_size), int(args.test_size), subdir)
                 print(f"Dataset for length {d} written to: {subdir}")
-                d *= 2
+                # d *= 2
+                d += 4
         else:
             subdir = os.path.join(base_dir, str(args.max_depth), "decoder")
             build_dataset(args.max_depth, int(args.train_size), int(args.test_size), subdir)

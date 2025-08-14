@@ -18,6 +18,7 @@ class DiTBlock(nn.Module):
         self.attn = SelfAttention(config)
         self.norm2 = nn.RMSNorm(config.n_embd, elementwise_affine=False)
         self.mlp = MLP(config)
+
         self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(config.n_embd, 6 * config.n_embd, bias=True))
 
     def forward(self, x, c, attn_mask=None):
@@ -27,42 +28,13 @@ class DiTBlock(nn.Module):
         return x
 
 
-class TimeModulatedLoopedTF(nn.Module):
+class TimeModulatedLoopedTF(LoopedTF):
     def __init__(self, config):
-        super().__init__()
-        assert config.vocab_size is not None
-        assert config.block_size is not None
-
-        self.pad_token_id = 0
-        if config.is_causal is False:
-            print("Warning: LoopedTF is not causal, using attn_mask for padding tokens.")
-
-        self.config = config
-        print(config)
-
-        self.transformer = nn.ModuleDict(
-            dict(
-                wte=nn.Embedding(config.vocab_size, config.n_embd),
-                wpe=nn.Embedding(config.block_size, config.n_embd),
-                drop=nn.Dropout(config.dropout),
-                h=nn.ModuleList([DiTBlock(config) for _ in range(config.n_layer)]),
-                ln_f=nn.RMSNorm(config.n_embd),
-            )
-        )
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        # self.transformer.wte.weight = self.lm_head.weight
-
+        super().__init__(config, DiTBlock)
         self.timestep_embedder = TimestepEmbedder(config.n_embd)
-
-        self.apply(self._init_weights)
-        for pn, p in self.named_parameters():
-            if pn.endswith("c_proj.weight"):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
-
         for block in self.transformer.h:
             nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
             nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
-
         print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
 
     def forward(self, idx, targets=None):
@@ -80,8 +52,13 @@ class TimeModulatedLoopedTF(nn.Module):
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
 
         tok_emb = self.transformer.wte(idx)
-        pos_emb = self.transformer.wpe(pos)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        if not self.config.use_rope:
+            pos_emb = self.transformer.wpe(pos)
+            x = tok_emb + pos_emb
+        else:
+            x = tok_emb
+
+        x = self.transformer.drop(x)
         for t in range(self.config.n_loop):
             t_emb = self.timestep_embedder(torch.full((b,), t, dtype=torch.long, device=device))
             for block in self.transformer.h:
@@ -90,18 +67,6 @@ class TimeModulatedLoopedTF(nn.Module):
         logits = self.lm_head(x)
 
         return logits
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-
-    def get_num_params(self):
-        n_params = sum(p.numel() for p in self.parameters())
-        return n_params
 
 
 # https://github.com/facebookresearch/DiT/blob/main/models.py#L27

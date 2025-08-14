@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+from rotary_embedding_torch import RotaryEmbedding
 from torch.nn import functional as F
 
 
@@ -22,6 +23,9 @@ class SelfAttention(nn.Module):
         self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention")
         assert self.flash == True, "Flash attention requires PyTorch 2.0 or later"
 
+        self.use_rope = config.use_rope if hasattr(config, "use_rope") else False
+        self.rotery_emb = RotaryEmbedding(dim=config.n_embd // config.n_head) if self.use_rope else None
+
     def forward(self, x, attn_mask=None):
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
 
@@ -29,6 +33,11 @@ class SelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
+
+        if self.use_rope:
+            # apply rotary positional embeddings
+            q = self.rotery_emb.rotate_queries_or_keys(q)
+            k = self.rotery_emb.rotate_queries_or_keys(k)
 
         y = torch.nn.functional.scaled_dot_product_attention(
             q,
@@ -187,6 +196,7 @@ class GPT(nn.Module):
 class LoopedTFConfig(GPTConfig):
     n_loop: int = 6  # number of loops to run
     is_causal: bool = False
+    use_rope: bool = True  # whether to use rotary positional embeddings
 
 
 # https://github.com/andreamad8/Universal-Transformer-Pytorch/blob/master/models/common_layer.py#L351
@@ -213,7 +223,7 @@ def _gen_timing_signal(length, channels, min_timescale=1.0, max_timescale=1.0e4)
 
 
 class LoopedTF(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, block=Block):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
@@ -224,19 +234,18 @@ class LoopedTF(nn.Module):
             print("Warning: LoopedTF is not causal, using attn_mask for padding tokens.")
 
         self.config = config
-
         print(config)
 
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.vocab_size, config.n_embd),
                 drop=nn.Dropout(config.dropout),
-                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                h=nn.ModuleList([block(config) for _ in range(config.n_layer)]),
                 ln_f=nn.RMSNorm(config.n_embd),
             )
         )
-        self.timing_signal = _gen_timing_signal(config.n_loop, config.n_embd)
-        self.position_signal = _gen_timing_signal(config.block_size, config.n_embd)
+        self.timing_signal = _gen_timing_signal(config.n_loop, config.n_embd) if block == Block else None
+        self.position_signal = _gen_timing_signal(config.block_size, config.n_embd) if not config.use_rope else None
 
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # self.transformer.wte.weight = self.lm_head.weight
@@ -265,9 +274,10 @@ class LoopedTF(nn.Module):
         # pred_list = []  # for storing predictions at each loop if n_loop is not None
         tok_emb = self.transformer.wte(idx)
         x = self.transformer.drop(tok_emb)
-        for step in range(self.config.n_loop if n_loop is None else n_loop):
-            x += self.timing_signal.to(device)[:, step, :]  # add timing signal
-            x += self.position_signal.to(device)[:, pos, :]  # add position signal
+        for step_idx in range(self.config.n_loop if n_loop is None else n_loop):
+            x += self.timing_signal.to(device)[:, step_idx, :]  # add timing signal
+            if not self.config.use_rope:
+                x += self.position_signal.to(device)[:, pos, :]  # add position signal
 
             for block in self.transformer.h:
                 x = block(x, attn_mask)

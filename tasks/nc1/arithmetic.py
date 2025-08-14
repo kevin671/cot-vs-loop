@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -25,16 +27,20 @@ class ArithmeticExpressionDataset(CurriculumDataset):
         d = config["min_input_size"]
         while d <= self.max_input_size:
             path = f"{data_dir}/{d}/chain/{split}_data.txt" if chain else f"{data_dir}/{d}/decoder/{split}_data.txt"
-            with open(path) as f:
-                lines = [line.split() for line in f.read().splitlines()]
-            raw[d] = lines
-            d *= 2
+            if os.path.exists(path):
+                with open(path) as f:
+                    lines = [line.split() for line in f.read().splitlines()]
+                raw[d] = lines
+            # d *= 2
+            d += 4
+
+        max_examples = 1000000
 
         self.X, self.Y = {}, {}
         for length, lines in raw.items():
             xs, ys = [], []
-            for tokens in lines:
-
+            # for tokens in lines:
+            for tokens in lines[:max_examples]:
                 if chain:
                     eq_pos = tokens.index("=")
                     inp = tokens[: eq_pos + 1]
@@ -82,14 +88,17 @@ class ArithmeticExpressionDataset(CurriculumDataset):
         return inp, tgt
 
 
+num_range = 11
+
+
 class ArithmeticExpressionTask(GeneralizationTask):
     def __init__(self, max_input_size=64):
         self.config = {
             "name": "arithmetic_expression",
             "data_dir": "data/arithmetic",
-            "vocab_size": 21,
-            "min_input_size": 4,
-            "num_range": 11,
+            "vocab_size": num_range + 10,
+            "min_input_size": 8,  # 4,
+            "num_range": num_range,
         }
         self.config["max_input_size"] = max_input_size
         self.config["max_length"] = max_input_size * 4 + 1
@@ -116,10 +125,10 @@ class ArithmeticExpressionTaskChain(GeneralizationTaskChain):
         config = {
             "name": "arithmetic_expression",
             "data_dir": "data/arithmetic",
-            "vocab_size": 21,
+            "vocab_size": num_range + 10,
             "min_input_size": max_input_size,
             "max_input_size": max_input_size,
-            "num_range": 11,
+            "num_range": num_range,
             "ignore_index": -100,
             "eos_token_id": 2,
         }

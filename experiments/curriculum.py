@@ -26,7 +26,7 @@ class RegularIncreaseCurriculum(Curriculum):
 
     def __init__(
         self,
-        initial_sequence_length: int,
+        init_input_size: int,
         increase_frequency: int,
         increase_amount: int,
         sample_all_length: bool = False,
@@ -35,7 +35,7 @@ class RegularIncreaseCurriculum(Curriculum):
     ):
         super().__init__()
         assert increase_frequency > 0, "increase_frequency must be ≥ 1"
-        self.initial_sequence_length = initial_sequence_length
+        self.init_input_size = init_input_size
         self.increase_frequency = increase_frequency
         self.increase_amount = increase_amount
         self.sample_all_length = sample_all_length
@@ -44,11 +44,11 @@ class RegularIncreaseCurriculum(Curriculum):
 
     def current_max_length(self) -> int:
         if self.global_step < self.warmup_steps:
-            return self.initial_sequence_length
+            return self.init_input_size
 
         effective_step = self.global_step - self.warmup_steps
         inc_steps = effective_step // self.increase_frequency
-        length = self.initial_sequence_length + self.increase_amount * inc_steps
+        length = self.init_input_size + self.increase_amount * inc_steps
         if self.max_sequence_length is not None:
             length = min(length, self.max_sequence_length)
         return length
@@ -56,7 +56,7 @@ class RegularIncreaseCurriculum(Curriculum):
     def sample_sequence_length(self) -> int:
         max_len = self.current_max_length()
         if self.sample_all_length:
-            length = int(np.random.randint(self.initial_sequence_length, max_len + 1))
+            length = int(np.random.randint(self.init_input_size, max_len + 1))
         else:
             length = max_len
         return length
@@ -73,7 +73,7 @@ class GeometricIncreaseCurriculum(Curriculum):
 
     def __init__(
         self,
-        initial_sequence_length: int,  # L₀
+        init_input_size: int,  # L₀
         base_steps: int,  # S₀
         increase_factor: int = 2,
         sample_all_length: bool = False,
@@ -81,7 +81,7 @@ class GeometricIncreaseCurriculum(Curriculum):
         warmup_steps: int = 0,
     ):
         super().__init__()
-        self.L0 = initial_sequence_length
+        self.L0 = init_input_size
         self.S0 = base_steps
         self.r = increase_factor
         self.sample_all_length = sample_all_length
@@ -89,9 +89,9 @@ class GeometricIncreaseCurriculum(Curriculum):
         self.warmup_steps = warmup_steps
 
     def _steps_for_length(self, length: int) -> int:
-        #ratio = max(1, length // self.L0)           # L / L0
-        #k = max(1, int(math.log2(ratio)))           # log2(L/L0) (最小1)
-        #return self.S0 * k
+        # ratio = max(1, length // self.L0)           # L / L0
+        # k = max(1, int(math.log2(ratio)))           # log2(L/L0) (最小1)
+        # return self.S0 * k
         return self.S0
 
     def current_max_length(self) -> int:
@@ -130,3 +130,24 @@ class FixedLengthCurriculum(Curriculum):
 
     def sample_sequence_length(self) -> int:
         return self.sequence_length
+
+
+class AdaptiveCurriculum(Curriculum):
+    """Adapts the sequence length based on performance metrics."""
+
+    def __init__(self, init_input_size: int, threshold: float, increase_amount: int):
+        super().__init__()
+        self.init_input_size = init_input_size
+        self.threshold = threshold
+        self.increase_amount = increase_amount
+        self.current_length = init_input_size
+
+    def sample_sequence_length(self) -> int:
+        return self.current_length
+
+    def update(self, performance_metric: float) -> None:
+        """Updates the sequence length based on the performance metric."""
+        if performance_metric >= self.threshold:
+            self.current_length += self.increase_amount
+        # else:
+        # self.current_length = max(self.init_input_size, self.current_length - self.increase_amount)
