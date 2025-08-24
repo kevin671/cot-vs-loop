@@ -196,7 +196,7 @@ class GPT(nn.Module):
 class LoopedTFConfig(GPTConfig):
     n_loop: int = 6  # number of loops to run
     is_causal: bool = False
-    use_rope: bool = True  # whether to use rotary positional embeddings
+    use_rope: bool = False  # whether to use rotary positional embeddings
 
 
 # https://github.com/andreamad8/Universal-Transformer-Pytorch/blob/master/models/common_layer.py#L351
@@ -238,6 +238,7 @@ class LoopedTF(nn.Module):
 
         self.transformer = nn.ModuleDict(
             dict(
+                wpe=nn.Embedding(config.block_size, config.n_embd) if not config.use_rope else None,
                 wte=nn.Embedding(config.vocab_size, config.n_embd),
                 drop=nn.Dropout(config.dropout),
                 h=nn.ModuleList([block(config) for _ in range(config.n_layer)]),
@@ -257,7 +258,7 @@ class LoopedTF(nn.Module):
 
         print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
 
-    def forward(self, idx, targets=None, n_loop=None):
+    def forward(self, idx):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size
@@ -270,28 +271,23 @@ class LoopedTF(nn.Module):
             attn_mask = attn_mask[:, None, None, :].to(device)
 
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
-
-        # pred_list = []  # for storing predictions at each loop if n_loop is not None
         tok_emb = self.transformer.wte(idx)
-        x = self.transformer.drop(tok_emb)
-        for step_idx in range(self.config.n_loop if n_loop is None else n_loop):
-            x += self.timing_signal.to(device)[:, step_idx, :]  # add timing signal
+        if self.transformer.wpe is not None:
+            pos_emb = self.transformer.wpe(pos)
+            x = self.transformer.drop(tok_emb + pos_emb)
+        else:
+            x = self.transformer.drop(tok_emb)
+        for step_idx in range(self.config.n_loop):
+            x += self.timing_signal.to(device)[:, step_idx, :]
             if not self.config.use_rope:
                 x += self.position_signal.to(device)[:, pos, :]  # add position signal
 
             for block in self.transformer.h:
                 x = block(x, attn_mask)
 
-            # if n_loop is not None:
-            #    pred_list.append(self.lm_head(self.transformer.ln_f(x)))
-
-            # if n_loop is not None:
-            #    return torch.stack(pred_list, dim=0)
-            # else:
-            x = self.transformer.ln_f(x)
-            logits = self.lm_head(x)
-
-            return logits
+        x = self.transformer.ln_f(x)
+        logits = self.lm_head(x)  # (b, t, vocab_size)
+        return logits
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -304,3 +300,45 @@ class LoopedTF(nn.Module):
     def get_num_params(self):
         n_params = sum(p.numel() for p in self.parameters())
         return n_params
+
+
+class LoopedTF_v2(LoopedTF):
+    def __init__(self, config):
+        super().__init__(config, block=Block)
+        self.transformer.wte.weight = self.lm_head.weight
+        self.timing_signal = None
+        self.transformer.drop = None
+
+    def one_step(self, x):
+        b, t, _ = x.size()
+        device = x.device
+        pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
+        pos_emb = self.transformer.wpe(pos)
+        x += pos_emb
+        for block in self.transformer.h:
+            x = block(x)
+        x = self.transformer.ln_f(x)
+        logits = self.lm_head(x)  # (b, t, vocab_size)
+        return logits
+
+    def forward(self, idx, n_loop=None):
+        b, t = idx.size()
+        assert t <= self.config.block_size
+
+        x = self.transformer.wte(idx)
+        # x = self.transformer.drop(tok_emb)
+
+        pred_list = [] if n_loop is not None else None
+        for _ in range(self.config.n_loop if n_loop is None else n_loop):
+            logits = self.one_step(x)
+
+            probs = F.softmax(logits, dim=-1)
+            x = probs @ self.transformer.wte.weight
+
+            if n_loop is not None:
+                pred_list.append(logits)
+
+        if n_loop is not None:
+            return torch.stack(pred_list, dim=0)
+
+        return logits

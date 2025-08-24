@@ -99,6 +99,7 @@ class ArithmeticExpressionTask(GeneralizationTask):
             "vocab_size": num_range + 10,
             "min_input_size": 8,  # 4,
             "num_range": num_range,
+            "increase_amount": 8,
         }
         self.config["max_input_size"] = max_input_size
         self.config["max_length"] = max_input_size * 4 + 1

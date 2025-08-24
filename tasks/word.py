@@ -99,14 +99,18 @@ class WordProblemTask(GeneralizationTask):
     Output: 4 5 0
     """
 
-    config = {
-        "name": "word_problem",
-        "description": "Compute prefix products over a sequence of group elements.",
-        "csv_path": "data/word_problem/S5_256.csv",  # "data/word_problem/S5_512.csv",  # Path to the CSV file with input-output pairs
-        "vocab_size": 120,
-        "max_length": 256,
-        "ignore_index": -100,
-    }
+    def __init__(self):
+        super().__init__()
+        config = {
+            "name": "word_problem",
+            "description": "Compute prefix products over a sequence of group elements.",
+            "csv_path": "data/word_problem/S5_256.csv",  # "data/word_problem/S5_512.csv",  # Path to the CSV file with input-output pairs
+            "vocab_size": 120,
+            "max_length": 256,
+            "ignore_index": -100,
+            "min_input_size": 4,
+        }
+        self.config = config
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         loss = F.cross_entropy(

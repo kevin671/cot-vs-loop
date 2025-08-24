@@ -142,12 +142,21 @@ class AdaptiveCurriculum(Curriculum):
         self.increase_amount = increase_amount
         self.current_length = init_input_size
 
+        self.max_updates = 10
+        self.update_count = 0
+
     def sample_sequence_length(self) -> int:
         return self.current_length
 
     def update(self, performance_metric: float) -> None:
         """Updates the sequence length based on the performance metric."""
-        if performance_metric >= self.threshold:
+        if self.update_count >= self.max_updates:
+            self.update_count = 0
             self.current_length += self.increase_amount
-        # else:
-        # self.current_length = max(self.init_input_size, self.current_length - self.increase_amount)
+        else:
+            self.update_count += 1
+
+        # if performance_metric >= self.threshold:
+        #    self.current_length += self.increase_amount
+        if performance_metric < self.threshold:
+            self.current_length += self.increase_amount

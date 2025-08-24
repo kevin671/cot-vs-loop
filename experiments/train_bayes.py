@@ -40,6 +40,7 @@ def main():
 
     parser.add_argument("--task", type=str, default="bayes_net")
     parser.add_argument("--input_size", type=int)
+    parser.add_argument("--seed", type=int, default=42)
 
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--epoch", type=int, default=100)
@@ -50,9 +51,11 @@ def main():
     parser.add_argument("--model", type=str, default="Looped", choices=["Looped", "GPT", "TMLT"])
     parser.add_argument("--n_embd", type=int, default=256)
     parser.add_argument("--n_head", type=int, default=4)
-    parser.add_argument("--n_layer", type=int, default=2)
+    parser.add_argument("--n_layer", type=int, default=1)
     parser.add_argument("--n_loop", type=int, default=16)
+    parser.add_argument("--n_eval_loop", type=int, default=None)
     parser.add_argument("--is_causal", action="store_true")
+    parser.add_argument("--use_rope", action="store_true")
 
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="./output")
@@ -60,28 +63,31 @@ def main():
     parser.add_argument("--deterministic", action="store_true", default=False, help="Use deterministic sampling")
     parser.add_argument("--chain", action="store_true")
 
+    parser.add_argument("--n_monte_carlo_samples", type=int, default=10)
+
     args = parser.parse_args()
     print(args)
 
     assert args.task == "bayes_net", "This script is specifically for the Bayes Net task."
-    assert args.is_causal is True, "Causal mask is required for Bayes Net task."
+    # assert args.is_causal is True, "Causal mask is required for Bayes Net task."
 
-    seed = 42
-    set_seed(seed)
+    set_seed(42)
     os.makedirs("./output", exist_ok=True)
 
-    from tasks.sharp_p.bayes_net import BayesNetOnlineDataset, BayesNetTask
+    from tasks.bayes_net import BayesNetOnlineDataset, BayesNetTask
 
-    task = BayesNetTask()
+    task = BayesNetTask(num_nodes=args.input_size)
     train_dataset = BayesNetOnlineDataset(
-        task.config, split="train", deterministic=args.deterministic, chain=args.chain
+        task.config, split="train", deterministic=args.deterministic, chain=args.chain, seed=args.seed
     )
-    test_dataset = BayesNetOnlineDataset(task.config, split="test", deterministic=args.deterministic, chain=args.chain)
+    test_dataset = BayesNetOnlineDataset(
+        task.config, split="test", deterministic=args.deterministic, chain=args.chain, seed=args.seed
+    )
 
     print(task.config)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1)
 
     # Model
     model = build_model(args, task)
@@ -102,10 +108,7 @@ def main():
         loader = islice(train_loader, steps_per_epoch)
         for i, (input_ids, y) in enumerate(tqdm(loader, total=steps_per_epoch)):
             inputs, y = input_ids.cuda(), y.long().cuda()
-            if args.model == "Looped":
-                logits = model(inputs, n_loop=1)[0]
-            else:
-                logits = model(inputs)
+            logits = model(inputs)
             loss = task.pointwise_loss_fn(logits, y)
 
             optimizer.zero_grad()
@@ -116,28 +119,45 @@ def main():
                 lr = optimizer.param_groups[0]["lr"]
                 wandb.log({"loss": loss.item(), "lr": lr})
 
-        n_eval = 100
-        n_loop_eval = args.n_loop  # task.config["num_nodes"]
-        if (epoch + 1) % args.val_interval == 0:
-            model.eval()
-            with torch.no_grad():
-                # total_acc = torch.tensor(0.0, device="cpu")
-                # total_acc = torch.zeros(n_loop_eval, device="cpu")
-                total_acc = torch.zeros(n_loop_eval, task.config["max_length"], device="cpu")
-                for input_ids, y in islice(test_loader, n_eval):
-                    inputs, y = input_ids.cuda(), y.long().cuda()
-                    logits_list = model(inputs, n_loop=n_loop_eval)
-                    for l, logits in enumerate(logits_list):
-                        acc_vec = task.accuracy_fn(logits, y).detach().cpu()
-                        total_acc[l] += acc_vec
-                    # total_acc += acc
-            avg_acc = total_acc / n_eval
-            print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
-            # wandb.log({"test_accuracy": avg_acc})
-
+        n_eval = 10
+        n_eval_loop = args.n_eval_loop if args.n_eval_loop is not None else train_dataset.depth - 1  # for deterministic
+        n_monte_carlo_samples = args.n_monte_carlo_samples
+        if (epoch + 1) % args.val_interval == 0 or epoch == args.epoch - 1:
             out_dir = os.path.join(args.output_dir, wandb.run.id)
             os.makedirs(out_dir, exist_ok=True)
             torch.save(model.state_dict(), f"{out_dir}/latest.pt")
+
+            total_mae = 0.0
+            model.eval()
+            with torch.no_grad():
+                for input_ids, gt_probs in islice(test_loader, n_eval):
+                    inputs = input_ids.cuda()
+                    # print("Input IDs:", inputs)
+                    if args.chain:
+                        pred_prob = 0.0
+                        for _ in range(n_monte_carlo_samples):
+                            idx = model.generate(inputs, max_new_tokens=task.config["max_length"] - inputs.shape[1])
+                            before_last_token = idx[:, : task.config["max_length"] - 1]  # the last token
+                            cond_logits = model(before_last_token)  # (1, seq_len, vocab_size)
+                            cond_probs = torch.softmax(cond_logits[:, -1, :], dim=-1)  # (1, vocab_size)
+                            pred_prob += cond_probs[0, 4].item()  # P(X=1|evidence) # assume batch_size=1
+                        pred_prob /= n_monte_carlo_samples
+
+                    else:  # for looped
+                        logits = model(inputs, n_loop=n_eval_loop)  # train_dataset.depth - 1)
+                        idx = torch.argmax(logits, dim=-1)
+                        print(idx)
+                        last_loop_logits = logits[-1]  # (1, seq_len, vocab_size)
+                        cond_logits = last_loop_logits[:, -1, :]  # (1, vocab_size)
+                        cond_probs = torch.softmax(cond_logits, dim=-1)  # (1, vocab_size)
+                        pred_prob = cond_probs[0, 4].item()  # P(X=1|evidence) # assume batch_size=1
+                        print(cond_probs)
+
+                    print(f"Predicted prob: {pred_prob}, Ground truth: {gt_probs.item()}")
+                    mae = abs(pred_prob - gt_probs.item())
+                    total_mae += mae
+            avg_acc = total_mae / n_eval
+            print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
 
 
 if __name__ == "__main__":

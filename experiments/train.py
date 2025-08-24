@@ -38,6 +38,7 @@ def main():
     parser.add_argument("--n_layer", type=int, default=2)
     parser.add_argument("--n_loop", type=int, default=16)
     parser.add_argument("--is_causal", action="store_true")
+    parser.add_argument("--use_rope", action="store_true")
     # Else
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="./output")
@@ -77,13 +78,13 @@ def main():
 
     max_length = args.input_size
     initial_len = task.config.get("min_input_size", 4) if args.min_input_size is None else args.min_input_size
+    increase_amount = task.config.get("increase_amount", 2)
     if args.curriculum == "fixed_length":
         curriculum = FixedLengthCurriculum(sequence_length=args.input_size)
     elif args.curriculum == "regular":
         total_steps = len(train_loader) * args.epoch
-        increase_amount = 2
         n_increments = math.ceil((max_length - initial_len) / increase_amount) + 1
-        increase_frequency = max(1, total_steps // n_increments)
+        increase_frequency = 40  # 200  # max(1, total_steps // n_increments)
         curriculum = RegularIncreaseCurriculum(
             init_input_size=initial_len,
             increase_frequency=increase_frequency,
@@ -94,9 +95,9 @@ def main():
     elif args.curriculum == "geometric":
         increase_factor = 2
         if args.task == "arithmetic":
-            base_steps = 500 * len(train_loader)  # 500 * len(train_loader)
+            base_steps = 500  # * len(train_loader)  # 500 * len(train_loader)
         elif args.task == "path":
-            base_steps = 100 * len(train_loader)
+            base_steps = 100  # * len(train_loader)
         else:
             base_steps = 5 * len(train_loader) if args.task == "bfvp" else 20 * len(train_loader)
         curriculum = GeometricIncreaseCurriculum(
@@ -110,8 +111,9 @@ def main():
     elif args.curriculum == "adaptive":
         curriculum = AdaptiveCurriculum(
             init_input_size=initial_len,
-            threshold=0.85,  # 0.9,
-            increase_amount=4,  # TODO: make this configurable
+            # threshold=0.85,  # 0.9,
+            threshold=0.03,  # loss
+            increase_amount=increase_amount,
         )
     else:
         raise ValueError(f"Unknown curriculum: {args.curriculum}")
@@ -145,12 +147,14 @@ def main():
             loss.backward()
             optimizer.step()
             scheduler.step()
-            curriculum.step()  # assume single GPU training
+            # curriculum.step()  # assume single GPU training
             if i % 100 == 0:
                 lr = optimizer.param_groups[0]["lr"]
                 seq_len = curriculum.sample_sequence_length()
                 wandb.log({"loss": loss.item(), "lr": lr})
                 wandb.log({"input_size": seq_len})
+
+        curriculum.step()  # assume single GPU training
 
         if (epoch + 1) % args.val_interval == 0:
             # Save the model
@@ -186,7 +190,8 @@ def main():
             avg_acc = total_acc / len(test_loader)
 
             if args.curriculum == "adaptive":
-                curriculum.update(avg_acc.item())
+                # curriculum.update(avg_acc.item())
+                curriculum.update(loss.item())
 
             wandb.log({"test_accuracy": avg_acc})
             print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
