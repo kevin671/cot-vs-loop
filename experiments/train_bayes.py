@@ -146,12 +146,10 @@ def main():
                     else:  # for looped
                         logits = model(inputs, n_loop=n_eval_loop)  # train_dataset.depth - 1)
                         idx = torch.argmax(logits, dim=-1)
-                        print(idx)
                         last_loop_logits = logits[-1]  # (1, seq_len, vocab_size)
                         cond_logits = last_loop_logits[:, -1, :]  # (1, vocab_size)
                         cond_probs = torch.softmax(cond_logits, dim=-1)  # (1, vocab_size)
                         pred_prob = cond_probs[0, 4].item()  # P(X=1|evidence) # assume batch_size=1
-                        print(cond_probs)
 
                     print(f"Predicted prob: {pred_prob}, Ground truth: {gt_probs.item()}")
                     mae = abs(pred_prob - gt_probs.item())
