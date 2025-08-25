@@ -119,7 +119,7 @@ def main():
                 lr = optimizer.param_groups[0]["lr"]
                 wandb.log({"loss": loss.item(), "lr": lr})
 
-        n_eval = 10
+        n_eval = 100
         n_eval_loop = args.n_eval_loop if args.n_eval_loop is not None else train_dataset.depth - 1  # for deterministic
         n_monte_carlo_samples = args.n_monte_carlo_samples
         if (epoch + 1) % args.val_interval == 0 or epoch == args.epoch - 1:

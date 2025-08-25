@@ -48,7 +48,7 @@ def main():
     parser.add_argument(
         "--curriculum",
         type=str,
-        default="fixed_length",
+        default="adaptive",
         choices=["fixed_length", "geometric", "regular", "adaptive"],
     )
 

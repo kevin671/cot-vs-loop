@@ -24,36 +24,29 @@ bash scripts/train.sh # train_chain.sh
 
 Dataset generation 
 ```shell
-python gen_data/word.py --group=S5 --k=256 --data_dir data/word_problem --samples=1000000 --overwrite
+python gen_data/word.py --group=S5 --k=64 --data_dir data/word_problem --samples=1000000
 python gen_data/path.py --num_nodes 32 --train_size 1000000 --test_size 100000 --data_dir data/path --seed 42
 python gen_data/arithmetic.py --max_depth 32 --train_size 1000000 --test_size 100000 --number_range 3 --under
-python gen_data/strings.py --train_size 1000000 --test_size 100000 --data_dir data/ed --length 32
+python gen_data/strings.py --length 32 --train_size 1000000 --test_size 100000 --data_dir data/ed
 ```
 Use `--chain` to generate a CoT dataset with intermediate steps following the full algorithms.
 
 
 Training for Looped Transformer
 ```shell
-python -m experiments.train --task word --input_size 256 --model Looped --n_layer 2 --n_loop 8 --is_causal --epoch 1000
-python -m experiments.train --task path --input_size 32 --model Looped --is_causal--n_loop 8 --epoch 1000
-python -m experiments.train --task arithmetic --input_size 32 --model TMLT --n_loop 8 --epoch 1000
-python -m experiments.train --task ed --input_size 32 --model TMLT --n_layer 1 --is_causal--n_loop 8 --epoch 1000 
+python -m experiments.train --task word --input_size 64 --model Looped --n_layer 2 --n_loop 8 --is_causal
+python -m experiments.train --task path --input_size 32 --model Looped --n_layer 1 --n_loop 8
+python -m experiments.train --task arithmetic --input_size 32 --model TMLT --n_layer 1 --n_loop 8
+python -m experiments.train --task ed --input_size 32 --model TMLT --n_layer 1 --n_loop 8 --curriculum fixed_length
 ```
-
-Training for CoT
-```shell
-python -m experiments.train --task word --input_size 256 --model Looped --n_layer 2 --n_loop 8 --is_causal --epoch 1000
-python -m experiments.train --task arithmetic --input_size 32 --model Looped --n_loop 8 --epoch 1000
-python -m experiments.train --task path --input_size 32 --model Looped --is_causal--n_loop 8 --epoch 1000
-python -m experiments.train --task ed --input_size 32 --model TMLT --n_layer 1 --is_causal--n_loop 8 --epoch 1000 
-```
+Replace with `--model GPT` and add `--chain` for training CoT.
 
 ### Probabilistic Inference
 
 ```shell
 python experiments/train_bayes.py --task bayes_net --input_size 12 --model GPT --epoch 1 --seed 10 --chain --n_monte_carlo_samples 10 # CoT
 python experiments/train_bayes.py --task bayes_net --input_size 12 --model Looped --is_causal --epoch 1 --seed 10 # Looped
-python experiments/train_bayes.py --task bayes_net.  --deterministi--input_size 12 --model Looped --is_causal --epoch 1 --seed 10 # deterministic control task for Looped
+python experiments/train_bayes.py --task bayes_net --deterministi --input_size 12 --model Looped --epoch 1 --seed 10 # deterministic control task for Looped
 ```
 
 ## Acknowledgement
