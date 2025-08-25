@@ -22,7 +22,7 @@ bash scripts/train.sh # train_chain.sh
 - Arithmetic Expression
 - Edit Distance
 
-Dataset generation 
+Dataset generation:
 ```shell
 python gen_data/word.py --group=S5 --k=64 --data_dir data/word_problem --samples=1000000
 python gen_data/path.py --num_nodes 32 --train_size 1000000 --test_size 100000 --data_dir data/path --seed 42
@@ -32,7 +32,7 @@ python gen_data/strings.py --length 32 --train_size 1000000 --test_size 100000 -
 Use `--chain` to generate a CoT dataset with intermediate steps following the full algorithms.
 
 
-Training for Looped Transformer
+Training for Looped Transformers:
 ```shell
 python -m experiments.train --task word --input_size 64 --model Looped --n_layer 2 --n_loop 8 --is_causal
 python -m experiments.train --task path --input_size 32 --model Looped --n_layer 1 --n_loop 8
