@@ -1,6 +1,6 @@
 # To CoT or to Loop?
 
-This repository provides the official implementation of the experiments in [To CoT or to Loop? A Formal Comparison Between Chain-of-Thought and Looped Transformers](https://arxiv.org/abs/2410.01405).
+This repository provides the official implementation of the experiments in [To CoT or to Loop? A Formal Comparison Between Chain-of-Thought and Latent Thought](https://arxiv.org/abs/2410.01405).
 
 ### Installation
 ```shell
