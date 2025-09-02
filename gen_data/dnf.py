@@ -30,8 +30,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_vars", type=int, default=NUM_VARS)
     parser.add_argument("--num_clauses", type=int, default=NUM_CLAUSES)
     parser.add_argument("--clause_width", type=int, default=CLAUSE_WIDTH)
-    parser.add_argument("--train_size", type=float, default=10)  # 1e4)
-    parser.add_argument("--test_size", type=float, default=1)  # 1e2)
+    parser.add_argument("--train_size", type=float, default=1e6)
+    parser.add_argument("--test_size", type=float, default=1e3)
 
     args = parser.parse_args()
 

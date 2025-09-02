@@ -14,7 +14,7 @@ Literal = Tuple[int, bool]  # (var_idx, is_neg)
 Conj = List[Literal]
 DNF = List[Conj]
 
-NUM_VARS = 10
+NUM_VARS = 5
 NUM_CLAUSES = 10
 CLAUSE_WIDTH = 3
 
@@ -106,23 +106,90 @@ def exact_dnf_count(dnf: DNF, n_vars: int) -> int:
     return total
 
 
+class DNFCountOfflineDataset(torch.utils.data.Dataset):
+    def __init__(self, config, split: str = "train", seed: int = 42):
+        super().__init__()
+        self.seed = seed
+        self.split = split
+        self.n = int(config["n"])
+        self.m = int(config["m"])
+        self.data_dir = config["data_dir"]
+        self.ignore_index = int(config.get("ignore_index", -100))
+
+        self._build_vocab()
+
+        path = f"{self.data_dir}/{'train' if split=='train' else 'test'}.txt"
+        X_tok_lists, counts = self._read_file(path)
+
+        self.X: List[torch.LongTensor] = [
+            torch.tensor([self.tok2id[t] for t in toks], dtype=torch.long) for toks in X_tok_lists
+        ]
+        self.Y = counts
+        # torch.tensor([self.tok2id[str(c)] for c in counts], dtype=torch.long)
+
+    def _build_vocab(self) -> None:
+        self.tok2id: Dict[str, int] = {}
+        add = lambda tok: self.tok2id.setdefault(tok, len(self.tok2id))
+
+        add("<pad>")
+        add("<sep>")
+        add("-1")  # ¬
+        add("+1")
+
+        for i in range(self.m):
+            add(str(i))
+
+        for i in range(self.n):
+            add(f"{i}=")
+
+        for i in range(2**self.n + 1):
+            add(str(i))
+
+    def _read_file(self, path: str) -> Tuple[List[List[str]], List[float]]:
+        X_tok_lists = []
+        counts = []
+        with open(path) as f:
+            for line in f:
+                tokens = line.split()
+                sep_pos = tokens.index("<sep>")
+                dnf_tokens = tokens[:sep_pos]
+                count_tokens = tokens[sep_pos + 1 :]
+                assert len(count_tokens) == 1
+                count = int(count_tokens[0])
+                X_tok_lists.append(dnf_tokens)
+                counts.append(count)
+        return X_tok_lists, counts
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        input_ids = self.X[idx]  # assume all same length
+        if self.split == "test":
+            return input_ids, torch.tensor(self.Y[idx], dtype=torch.float)
+        labels = torch.full_like(input_ids, fill_value=self.ignore_index)
+        labels[-1] = self.tok2id[str(self.Y[idx])]
+        return input_ids, labels
+
+
 class DNFCountOnlineDataset(IterableDataset):
-    def __init__(self, config, split="train", chain=True, seed=42):
+    def __init__(self, config, split="train", seed=42):
         super().__init__()
         self.seed = seed
         self.split = split
         n = config["n"]
         self.n = n  # number of variables
         m = config["m"]
+        self.m = m  # number of clauses
         w = config["w"]
         self.gen_random_dnf = partial(gen_random_dnf, n, m, w)
         self.sample_assignment_given_conj = partial(sample_assignment_given_conj, n)
 
         dummy_dnf = self.gen_random_dnf(random.Random())
         p_clause = [2.0 ** (-len(conj)) for conj in dummy_dnf]
-        self.s = sum(p_clause)
+        s = sum(p_clause)
         self.choices = list(range(m))
-        self.weights = [pc / self.s for pc in p_clause]
+        self.weights = [pc / s for pc in p_clause]
 
         self.ignore_index = config.get("ignore_index", -100)
         self._build_vocab()
@@ -138,8 +205,11 @@ class DNFCountOnlineDataset(IterableDataset):
         add("+1")
         add("Success")
         add("Failure")
-        for i in range(self.n):
+
+        for i in range(self.m):
             add(str(i))
+
+        for i in range(self.n):
             add(f"{i}=")
 
     def __iter__(self):
@@ -192,16 +262,16 @@ class DNFCountOnlineDataset(IterableDataset):
 
 
 class DNFCountTask(GeneralizationTask):
-    def __init__(self, n, m, w):
+    def __init__(self, n, m, w, chain):
         super().__init__()
         self.config = {
             "n": n,  # number of variables
             "m": m,  # number of clauses
             "w": w,  # width of each clause
             "data_dir": "data/dnf",
-            "max_length": m * (1 + w * 2) + 3 + 2 * n + 5,
+            "max_length": m * (1 + w * 2) + 3 + 2 * n + 5 if chain else m * (1 + w * 2) + 1,
             "ignore_index": -100,
-            "vocab_size": 7 + n * 2,
+            "vocab_size": 7 + n + m if chain else (2**n + 1) + 4 + n + m,
         }
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -215,10 +285,11 @@ class DNFCountTask(GeneralizationTask):
 
 
 if __name__ == "__main__":
-    n = 10
-    m = n // 2
-    w = 3
+    n = NUM_VARS
+    m = NUM_CLAUSES
+    w = CLAUSE_WIDTH
 
+    """
     dnf = gen_random_dnf(n, m, w, random.Random())
     for conj in dnf:
         print(" AND ".join([f"{'' if not is_neg else '-'}x{var_idx}" for var_idx, is_neg in conj]))
@@ -231,10 +302,13 @@ if __name__ == "__main__":
 
     exact = exact_dnf_count(dnf, n)
     print("Exact:", exact)
+    """
 
-    # task = DNFCountTask(n=20, m=10, w=3)
-    # dataset = DNFCountOnlineDataset(task.config, split="test", chain=False, seed=42)
-    # for i, (input_ids, y) in enumerate(dataset):
-    #    if i >= 10:
-    #        break
-    #    print(input_ids, y)
+    task = DNFCountTask(n=n, m=m, w=w, chain=False)
+    # dataset = DNFCountOnlineDataset(task.config, split="test", seed=42)
+    dataset = DNFCountOfflineDataset(task.config, split="test", seed=42)
+    print(len(dataset))
+    for i, (input_ids, y) in enumerate(dataset):
+        if i >= 10:
+            break
+        print(input_ids, y)

@@ -44,9 +44,9 @@ Replace with `--model GPT` and add `--chain` for training CoT.
 ###  Approximation Task
 
 ```shell
-python -m experiments.train_dnf --model GPT --chain --num_mc_samples 1000 # CoT
+python -m experiments.train_dnf --model GPT --chain --steps_per_epoch 10000 --num_mc_samples 1000 # CoT
 python gen_data/dnf.py # generating dataset
-python -m experiments.train_dnf --model Looped # Looped
+python -m experiments.train_dnf --model Looped --epoch 10 --n_loop 100 # Looped
 ```
 
 ## Acknowledgement
