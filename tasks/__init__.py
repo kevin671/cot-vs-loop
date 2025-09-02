@@ -3,7 +3,7 @@ from .arithmetic import (
     ArithmeticExpressionTask,
     ArithmeticExpressionTaskChain,
 )
-from .bfvp import BooleanFormulaValueProblemDataset, BooleanFormulaValueProblemTask
+from .dnf import DNFCountDataset, DNFCountTask
 from .path import ReachabilityDataset, ReachabilityTask, ReachabilityTaskChain
 from .strings import (
     EditDistanceTask,
@@ -13,12 +13,8 @@ from .strings import (
 )
 from .word import WordProblemDataset, WordProblemTask, WordProblemTaskChain
 
-# from .p_complete.cvp import CircuitValueProblemDataset, CircuitValueProblemTask
-
 
 def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
-    max_input_size = args.input_size
-    min_input_size = args.min_input_size if args.curriculum != "fixed_length" else max_input_size
     if args.task == "word":
         if chain:
             task = WordProblemTaskChain(max_input_size=args.input_size, cot_length=cot_length)
@@ -26,10 +22,6 @@ def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
             task = WordProblemTask()
         train_dataset = WordProblemDataset(task.config, split="train", chain=chain)
         test_dataset = WordProblemDataset(task.config, split="test", chain=chain)
-    elif args.task == "bfvp":
-        task = BooleanFormulaValueProblemTask(max_input_size=args.input_size, min_input_size=min_input_size)
-        train_dataset = BooleanFormulaValueProblemDataset(task.config, split="train")
-        test_dataset = BooleanFormulaValueProblemDataset(task.config, split="test")
     elif args.task == "path":
         if chain:
             task = ReachabilityTaskChain(max_input_size=args.input_size, cot_length=cot_length)
@@ -55,10 +47,10 @@ def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
         task = LongestCommonSubsequenceTask(max_input_size=args.input_size)
         train_dataset = PairwiseAlignmentDataset(task.config, split="train")
         test_dataset = PairwiseAlignmentDataset(task.config, split="test")
-    elif args.task == "cfg":
-        pass
-    elif args.task == "cvp":
-        pass
+    elif args.task == "dnf":
+        task = DNFCountTask(input_size=args.input_size)
+        train_dataset = DNFCountDataset(task.config, split="train")
+        test_dataset = DNFCountDataset(task.config, split="test")
     else:
         raise ValueError(f"Unknown task: {args.task}")
 
