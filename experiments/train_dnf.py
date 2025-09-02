@@ -1,5 +1,6 @@
 import argparse
 import os
+import random
 from itertools import islice
 
 import torch
@@ -9,6 +10,14 @@ from transformers import get_scheduler, set_seed
 
 import wandb
 from models import build_model
+from tasks.dnf import (
+    CLAUSE_WIDTH,
+    NUM_CLAUSES,
+    NUM_VARS,
+    DNFCountOnlineDataset,
+    DNFCountTask,
+    gen_random_dnf,
+)
 
 
 def set_optimizer_scheduler(model, args, steps_per_epoch=10_000):
@@ -38,17 +47,19 @@ def set_optimizer_scheduler(model, args, steps_per_epoch=10_000):
 def main():
     parser = argparse.ArgumentParser(description="train")
 
-    parser.add_argument("--task", type=str, default="bayes_net")
-    parser.add_argument("--input_size", type=int)
+    parser.add_argument("--task", type=str, default="dnf")
+    parser.add_argument("--num_vars", type=int, default=NUM_VARS)
+    parser.add_argument("--num_clauses", type=int, default=NUM_CLAUSES)
+    parser.add_argument("--clause_width", type=int, default=CLAUSE_WIDTH)
     parser.add_argument("--seed", type=int, default=42)
 
     parser.add_argument("--learning_rate", type=float, default=1e-4)
-    parser.add_argument("--epoch", type=int, default=100)
+    parser.add_argument("--epoch", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--weight_decay", type=float, default=0.01)
 
-    parser.add_argument("--model", type=str, default="Looped", choices=["Looped", "GPT", "TMLT"])
+    parser.add_argument("--model", type=str, default="Looped", choices=["Looped", "GPT"])
     parser.add_argument("--n_embd", type=int, default=256)
     parser.add_argument("--n_head", type=int, default=4)
     parser.add_argument("--n_layer", type=int, default=1)
@@ -60,29 +71,29 @@ def main():
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="./output")
     parser.add_argument("--val_interval", type=int, default=10)
-    parser.add_argument("--deterministic", action="store_true", default=False, help="Use deterministic sampling")
     parser.add_argument("--chain", action="store_true")
 
-    parser.add_argument("--n_monte_carlo_samples", type=int, default=10)
+    parser.add_argument("--num_mc_samples", type=int, default=10)
 
     args = parser.parse_args()
     print(args)
 
-    assert args.task == "bayes_net", "This script is specifically for the Bayes Net task."
-    # assert args.is_causal is True, "Causal mask is required for Bayes Net task."
+    assert args.task == "dnf"
 
     set_seed(42)
     os.makedirs("./output", exist_ok=True)
 
-    from tasks.bayes_net import BayesNetOnlineDataset, BayesNetTask
+    n = args.num_vars
+    m = args.num_vars // 2
+    w = 3
+    task = DNFCountTask(n, m, w)
 
-    task = BayesNetTask(num_nodes=args.input_size)
-    train_dataset = BayesNetOnlineDataset(
-        task.config, split="train", deterministic=args.deterministic, chain=args.chain, seed=args.seed
-    )
-    test_dataset = BayesNetOnlineDataset(
-        task.config, split="test", deterministic=args.deterministic, chain=args.chain, seed=args.seed
-    )
+    dummy_dnf = gen_random_dnf(n, m, w, random.Random())
+    p_clause = [2.0 ** (-len(conj)) for conj in dummy_dnf]
+    s = sum(p_clause)
+
+    train_dataset = DNFCountOnlineDataset(task.config, split="train", chain=args.chain, seed=args.seed)
+    test_dataset = DNFCountOnlineDataset(task.config, split="test", chain=args.chain, seed=args.seed)
 
     print(task.config)
 
@@ -101,7 +112,7 @@ def main():
 
     optimizer, scheduler = set_optimizer_scheduler(model, args, steps_per_epoch=steps_per_epoch)
 
-    wandb.init(project="cotloop", config=args, name=f"{args.task}_{args.input_size}_{args.model}")
+    wandb.init(project="cotloop", config=args, name=f"{args.task}_{args.num_vars}_{args.model}")
 
     for epoch in range(args.epoch):
         model.train()
@@ -120,29 +131,38 @@ def main():
                 wandb.log({"loss": loss.item(), "lr": lr})
 
         n_eval = 100
-        n_eval_loop = args.n_eval_loop if args.n_eval_loop is not None else train_dataset.depth - 1  # for deterministic
-        n_monte_carlo_samples = args.n_monte_carlo_samples
+        # n_eval_loop = args.n_eval_loop if args.n_eval_loop is not None else train_dataset.depth - 1  # for deterministic
+        tau = args.n_monte_carlo_samples
         if (epoch + 1) % args.val_interval == 0 or epoch == args.epoch - 1:
+
+            # save model
             out_dir = os.path.join(args.output_dir, wandb.run.id)
             os.makedirs(out_dir, exist_ok=True)
             torch.save(model.state_dict(), f"{out_dir}/latest.pt")
 
-            total_mae = 0.0
+            # evaluate
+            total_relative_error = 0.0
             model.eval()
             with torch.no_grad():
-                for input_ids, gt_probs in islice(test_loader, n_eval):
+                for input_ids, gt_count in islice(test_loader, n_eval):
                     inputs = input_ids.cuda()
                     # print("Input IDs:", inputs)
                     if args.chain:
-                        pred_prob = 0.0
-                        for _ in range(n_monte_carlo_samples):
+                        N = 0
+                        for _ in range(tau):
                             idx = model.generate(inputs, max_new_tokens=task.config["max_length"] - inputs.shape[1])
-                            before_last_token = idx[:, : task.config["max_length"] - 1]  # the last token
-                            cond_logits = model(before_last_token)  # (1, seq_len, vocab_size)
-                            cond_probs = torch.softmax(cond_logits[:, -1, :], dim=-1)  # (1, vocab_size)
-                            pred_prob += cond_probs[0, 4].item()  # P(X=1|evidence) # assume batch_size=1
-                        pred_prob /= n_monte_carlo_samples
+                            print("Generated IDs:", idx)
+                            pred = idx[0, -2].item()  # the last token is <eos>
+                            if pred == 5:  # "Success"
+                                N += 1
 
+                        if N == 0:
+                            print("Warning: N=0")
+
+                        mu_hat = (tau * s) / ((m * N) + 1e-8)
+                        count = mu_hat * (2.0**n)
+
+                    """
                     else:  # for looped
                         logits = model(inputs, n_loop=n_eval_loop)  # train_dataset.depth - 1)
                         idx = torch.argmax(logits, dim=-1)
@@ -150,11 +170,13 @@ def main():
                         cond_logits = last_loop_logits[:, -1, :]  # (1, vocab_size)
                         cond_probs = torch.softmax(cond_logits, dim=-1)  # (1, vocab_size)
                         pred_prob = cond_probs[0, 4].item()  # P(X=1|evidence) # assume batch_size=1
+                    """
 
-                    print(f"Predicted prob: {pred_prob}, Ground truth: {gt_probs.item()}")
-                    mae = abs(pred_prob - gt_probs.item())
-                    total_mae += mae
-            avg_acc = total_mae / n_eval
+                    print(f"GT count: {gt_count.item()}, Pred count: {count}")
+                    relative_error = abs(count - gt_count.item()) / (gt_count.item() + 1e-8)
+                    # mae = abs(count - gt_count.item())
+                    total_relative_error += relative_error
+            avg_acc = total_relative_error / n_eval
             print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
 
 

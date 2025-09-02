@@ -3,7 +3,6 @@ from .arithmetic import (
     ArithmeticExpressionTask,
     ArithmeticExpressionTaskChain,
 )
-from .dnf import DNFCountDataset, DNFCountTask
 from .path import ReachabilityDataset, ReachabilityTask, ReachabilityTaskChain
 from .strings import (
     EditDistanceTask,
@@ -47,10 +46,6 @@ def get_task_and_datasets(args, chain: bool = False, cot_length: int = None):
         task = LongestCommonSubsequenceTask(max_input_size=args.input_size)
         train_dataset = PairwiseAlignmentDataset(task.config, split="train")
         test_dataset = PairwiseAlignmentDataset(task.config, split="test")
-    elif args.task == "dnf":
-        task = DNFCountTask(input_size=args.input_size)
-        train_dataset = DNFCountDataset(task.config, split="train")
-        test_dataset = DNFCountDataset(task.config, split="test")
     else:
         raise ValueError(f"Unknown task: {args.task}")
 

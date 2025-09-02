@@ -1,6 +1,6 @@
-# To CoT or to Loop?
+# Chain-of-Thought vs. Latent Thought
 
-This repository provides the official implementation of the experiments in [To CoT or to Loop? A Formal Comparison Between Chain-of-Thought and Latent Thought](https://arxiv.org/abs/2410.01405).
+This repository provides the official implementation of the experiments in [A Formal Comparison Between Chain-of-Thought and Latent Thought](https://arxiv.org/abs/2410.01405).
 
 ### Installation
 ```shell
@@ -16,7 +16,7 @@ conda activate cotloop
 bash scripts/train.sh # train_chain.sh
 ```
 
-### Deterministic Tasks that Admit Feasible Parallel Solutions
+### Parallelizable Tasks
 - Word Problem
 - Graph Connectivity 
 - Arithmetic Expression
@@ -41,12 +41,12 @@ python -m experiments.train --task ed --input_size 32 --model TMLT --n_layer 1 -
 ```
 Replace with `--model GPT` and add `--chain` for training CoT.
 
-###  Approximate DNF Counting
+###  Approximation Task
 
 ```shell
-python experiments/ # generating dataset
- # CoT
- # Looped
+python -m experiments.train_dnf --model GPT --chain --num_mc_samples 1000 # CoT
+python gen_data/dnf.py # generating dataset
+python -m experiments.train_dnf --model Looped # Looped
 ```
 
 ## Acknowledgement
@@ -54,4 +54,4 @@ python experiments/ # generating dataset
 - [Towards Revealing the Mystery behind Chain of Thought: a Theoretical Perspective (NeurIPS 2023)](https://github.com/guyuntian/CoT_benchmark)
 - [Why think step by step? Reasoning emerges from the locality of experience (NeurIPS 2023)](https://github.com/benpry/why-think-step-by-step)
 - [The Illusion of State in State-Space Models (ICML 2024)](https://github.com/jopetty/word-problem)
-- [Leveraging Neural Networks for Approximate DNF Counting (AAAI 2000)](https://github.com/ralphabb/NeuralDNF)
+- [Leveraging Neural Networks for Approximate DNF Counting (AAAI 2020)](https://github.com/ralphabb/NeuralDNF)
