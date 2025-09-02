@@ -2,6 +2,8 @@
 
 This repository provides the official implementation of the experiments in [A Formal Comparison Between Chain-of-Thought and Latent Thought](https://arxiv.org/abs/2410.01405).
 
+![CoT vs Looped](assets/cot_vs_loop.png)
+
 ### Installation
 ```shell
 conda create --name cotloop

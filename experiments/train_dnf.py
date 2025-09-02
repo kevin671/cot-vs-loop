@@ -39,7 +39,7 @@ def set_optimizer_scheduler(model, args, steps_per_epoch=10_000):
     scheduler = get_scheduler(
         name="linear",
         optimizer=optimizer,
-        num_warmup_steps=10000,
+        num_warmup_steps=1000,
         num_training_steps=steps_per_epoch * args.epoch,
     )
     return optimizer, scheduler
@@ -103,7 +103,8 @@ def main():
         test_dataset = DNFCountOfflineDataset(task.config, split="test", seed=args.seed)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1)
+    test_batch_size = 1 if args.chain else args.batch_size
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=test_batch_size)
 
     # Model
     model = build_model(args, task)
@@ -113,7 +114,7 @@ def main():
         model.load_state_dict(torch.load(args.model_path), strict=True)
         print(f"Loaded model from {args.model_path}")
 
-    steps_per_epoch = 10000 if args.chain else len(train_loader)
+    steps_per_epoch = args.steps_per_epoch if args.chain else len(train_loader)
 
     optimizer, scheduler = set_optimizer_scheduler(model, args, steps_per_epoch=steps_per_epoch)
 
@@ -122,8 +123,8 @@ def main():
     total_epochs = 1 if args.chain else args.epoch
     for epoch in range(total_epochs):
         model.train()
-        loader = islice(train_loader, steps_per_epoch) if not args.chain else train_loader
-        for i, (input_ids, y) in enumerate(tqdm(loader, total=steps_per_epoch)):
+        loader = islice(train_loader, steps_per_epoch) if args.chain else train_loader
+        for i, (input_ids, y) in enumerate(tqdm(loader, total=steps_per_epoch if args.chain else len(train_loader))):
             inputs, y = input_ids.cuda(), y.long().cuda()
             logits = model(inputs)
             loss = task.pointwise_loss_fn(logits, y)
@@ -149,21 +150,22 @@ def main():
             total_relative_error = 0.0
             model.eval()
             with torch.no_grad():
-                loader = islice(test_loader, n_test) if not args.chain else test_loader
-                for input_ids, gt_count in tqdm(loader, total=n_test):
+                loader = islice(test_loader, n_test) if args.chain else test_loader
+                for input_ids, gt_count in tqdm(loader, total=n_test if args.chain else len(test_loader)):
                     inputs = input_ids.cuda()
                     # print("Input IDs:", inputs)
+                    N = None
                     if args.chain:
-                        N = 0
-                        for _ in range(tau):
-                            idx = model.generate(inputs, max_new_tokens=task.config["max_length"] - inputs.shape[1])
-                            # print("Generated IDs:", idx)
-                            pred = idx[0, -2].item()  # the last token is <eos>
-                            if pred == 5:  # "Success"
-                                N += 1
-
-                        if N == 0:
-                            print("Warning: N=0")
+                        while N is None or N == 0:
+                            N = 0
+                            test_batch_size = 1  # 00
+                            inputs = inputs.repeat(test_batch_size, 1)
+                            for _ in range(tau // test_batch_size):
+                                idx = model.generate(inputs, max_new_tokens=task.config["max_length"] - inputs.shape[1])
+                                # print("Generated IDs:", idx)
+                                preds = idx[:, -2]  # shape: (batch,)
+                                N += (preds == 5).sum().item()
+                                # print(f"Intermediate N: {N}")
 
                         mu_hat = (tau * s) / ((m * N) + 1e-8)
                         count_pred = mu_hat * (2.0**n)
@@ -173,7 +175,7 @@ def main():
                         count_pred = torch.argmax(logit[0, -1]).item()
                         count_pred -= task.config["vocab_size"] - 2**n - 1
 
-                    # print(f"GT count: {gt_count.item()}, Pred count: {count_pred}")
+                    print(f"GT count: {gt_count.item()}, Pred count: {count_pred}")
                     relative_error = abs(count_pred - gt_count.item()) / (gt_count.item() + 1e-8)
                     # mae = abs(count - gt_count.item())
                     total_relative_error += relative_error

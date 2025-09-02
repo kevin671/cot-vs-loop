@@ -1,5 +1,5 @@
 from .tmlt import TimeModulatedLoopedTF
-from .transformer import GPT, GPTConfig, LoopedTF, LoopedTF_v2, LoopedTFConfig
+from .transformer import GPT, GPTConfig, LoopedTF, LoopedTFConfig
 
 
 def build_model(args, task):
@@ -20,10 +20,7 @@ def build_model(args, task):
             use_rope=args.use_rope,
         )
         if args.model == "Looped":
-            if args.task == "bayes_net":
-                model = LoopedTF_v2(model_config)
-            else:
-                model = LoopedTF(model_config)
+            model = LoopedTF(model_config)
         else:
             model = TimeModulatedLoopedTF(model_config)
 
