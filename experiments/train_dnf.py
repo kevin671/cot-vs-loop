@@ -103,8 +103,7 @@ def main():
         test_dataset = DNFCountOfflineDataset(task.config, split="test", seed=args.seed)
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size)
-    test_batch_size = 1 if args.chain else args.batch_size
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=test_batch_size)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1)
 
     # Model
     model = build_model(args, task)
@@ -175,9 +174,9 @@ def main():
                         count_pred = torch.argmax(logit[0, -1]).item()
                         count_pred -= task.config["vocab_size"] - 2**n - 1
 
-                    print(f"GT count: {gt_count.item()}, Pred count: {count_pred}")
+                    # print(f"GT count: {gt_count.item()}, Pred count: {count_pred}")
                     relative_error = abs(count_pred - gt_count.item()) / (gt_count.item() + 1e-8)
-                    # mae = abs(count - gt_count.item())
+                    # print(f"Relative Error: {relative_error}")
                     total_relative_error += relative_error
             avg_acc = total_relative_error / n_test
             print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
