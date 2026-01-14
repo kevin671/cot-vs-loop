@@ -11,3 +11,5 @@ data/
 output/
 binary/unigen
 *.ipynb
+checkpoints/
+*.sh

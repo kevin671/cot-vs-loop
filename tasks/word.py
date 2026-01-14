@@ -31,8 +31,9 @@ class WordProblemDataset(CurriculumDataset):
                         if cot_len is None:
                             sampled_cot = cot
                         else:
-                            indices = np.linspace(0, total_len - 1, cot_len, dtype=int).tolist()
-                            sampled_cot = [cot[i] for i in indices]
+                            # indices = np.linspace(0, total_len - 1, cot_len, dtype=int).tolist()
+                            # sampled_cot = [cot[i] for i in indices]
+                            sampled_cot = cot[:cot_len]
                         input_ids = inp + sampled_cot + [ans]
                         label_ids = torch.tensor(input_ids[1:] + [eos_token_id], dtype=torch.long)
                         label_ids[: len(inp) - 1] = self.config["ignore_index"]
@@ -104,9 +105,9 @@ class WordProblemTask(GeneralizationTask):
         config = {
             "name": "word_problem",
             "description": "Compute prefix products over a sequence of group elements.",
-            "csv_path": "data/word_problem/S5_256.csv",  # "data/word_problem/S5_512.csv",  # Path to the CSV file with input-output pairs
+            "csv_path": "data/word_problem/S5_64.csv",
             "vocab_size": 120,
-            "max_length": 256,
+            "max_length": 64,
             "ignore_index": -100,
             "min_input_size": 4,
         }

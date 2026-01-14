@@ -1,5 +1,5 @@
 from .tmlt import TimeModulatedLoopedTF
-from .transformer import GPT, GPTConfig, LoopedTF, LoopedTFConfig
+from .transformer import CT, GPT, CTConfig, GPTConfig, LoopedTF, LoopedTFConfig
 
 
 def build_model(args, task):
@@ -23,6 +23,11 @@ def build_model(args, task):
             model = LoopedTF(model_config)
         else:
             model = TimeModulatedLoopedTF(model_config)
+
+    elif args.model == "CT":
+        tf_config["block_size"] += args.n_step
+        model_config = CTConfig(**tf_config, n_step=args.n_step)
+        model = CT(model_config)
 
     else:
         model_config = GPTConfig(**tf_config)

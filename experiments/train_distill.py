@@ -45,7 +45,8 @@ def main():
     parser.add_argument("--output_dir", type=str, default="./output")
     parser.add_argument("--val_interval", type=int, default=10)
     parser.add_argument("--chain", action="store_true")
-    parser.add_argument("--cot_length", type=int, default=None)
+    parser.add_argument("--min_cot_length", type=int, default=0)
+    parser.add_argument("--max_cot_length", type=int, default=None)
     parser.add_argument(
         "--curriculum",
         type=str,
@@ -60,22 +61,14 @@ def main():
     set_seed(seed)
     os.makedirs("./output", exist_ok=True)
 
-    task, train_dataset, test_dataset = get_task_and_datasets(args, chain=args.chain, cot_length=args.cot_length)
+    task, train_dataset, test_dataset = get_task_and_datasets(args, chain=args.chain, cot_length=args.max_cot_length)
 
     print(task.config)
 
     collate_fn = getattr(task, "collate_fn", None)
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
-    )
-    if args.chain and args.task != "word":
-        test_batch_size = 1
-        test_dataset = torch.utils.data.Subset(test_dataset, range(1000))
-    else:
-        test_batch_size = args.batch_size
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=test_batch_size, shuffle=False, collate_fn=collate_fn
-    )
+    # train_loader = torch.utils.data.DataLoader(
+    #    train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
+    # )
 
     max_length = args.input_size
     initial_len = task.config.get("min_input_size", 4) if args.min_input_size is None else args.min_input_size
@@ -137,6 +130,22 @@ def main():
 
     for epoch in range(args.epoch):
         model.train()
+
+        # Distillation: refresh datasets each epoch
+        cur_cot_length = min(args.min_cot_length, args.max_cot_length - epoch)
+        task, train_dataset, test_dataset = get_task_and_datasets(args, chain=args.chain, cot_length=cur_cot_length)
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
+        )
+        if args.chain and args.task != "word":
+            test_batch_size = 1
+            test_dataset = torch.utils.data.Subset(test_dataset, range(1000))
+        else:
+            test_batch_size = args.batch_size
+        test_loader = torch.utils.data.DataLoader(
+            test_dataset, batch_size=test_batch_size, shuffle=False, collate_fn=collate_fn
+        )
+
         seq_len = curriculum.sample_sequence_length()
         print(f"Epoch {epoch + 1}/{args.epoch}, Sequence Length: {seq_len}")
         for i, (input_ids, y) in enumerate(tqdm(train_loader)):
@@ -176,10 +185,12 @@ def main():
                     inputs, y = input_ids.cuda(), y.long().cuda()
                     if args.chain:
                         if args.task == "word":
-                            max_new_tokens = args.cot_length + 2 if args.cot_length else args.input_size + 2
+                            max_new_tokens = args.cur_cot_length + 2 if args.cur_cot_length else args.input_size + 2
                         else:
                             max_new_tokens = (
-                                args.input_size * 3 + args.cot_length if args.cot_length else task.config["max_length"]
+                                args.input_size * 3 + args.cur_cot_length
+                                if args.cur_cot_length
+                                else task.config["max_length"]
                             )
                         idx = model.generate(inputs, top_k=1, max_new_tokens=max_new_tokens)
                         acc = task.accuracy_fn(idx, y).detach().cpu()

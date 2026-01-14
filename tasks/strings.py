@@ -142,7 +142,7 @@ class EditDistanceTask(PairwiseAlignmentTask):
             "name": "edit_distance",
             "data_dir": "data/ed",
             "max_input_size": max_input_size,
-            "min_input_size": 16,
+            "min_input_size": max_input_size,  # 16,
         }
         config["max_value"] = 3 * (config["max_input_size"] + 2)
         config["vocab_size"] = config["max_value"] + 32
@@ -156,7 +156,7 @@ class LongestCommonSubsequenceTask(PairwiseAlignmentTask):
             "name": "longest_common_subsequence",
             "data_dir": "data/lcs",
             "max_input_size": max_input_size,
-            "min_input_size": 16,
+            "min_input_size": max_input_size,  # 16,
         }
         config["max_value"] = config["max_input_size"] + 5
         config["vocab_size"] = config["max_value"] + 32
@@ -170,7 +170,7 @@ class EditDistanceTaskChain(GeneralizationTask):
             "name": "edit_distance",
             "data_dir": "data/ed",
             "max_input_size": max_input_size,
-            "min_input_size": 16,
+            "min_input_size": max_input_size,  # 16,
             "ignore_index": -100,  # for causal language modeling
         }
         config["max_value"] = 3 * (config["max_input_size"] + 3)  # + 10 for the DP table values from chain
@@ -180,73 +180,20 @@ class EditDistanceTaskChain(GeneralizationTask):
         self.config = config
 
     def pointwise_loss_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # pred = output.argmax(dim=-1)  # shape: (B, T)
-        # mask = target != self.config["ignore_index"]  # shape: (B, T)
-        # correct = (pred == target) & mask
-        # print(f"Predictions: {pred.tolist()}", flush=True)
-        # print(f"Targets: {target.tolist()}", flush=True)
-        # print(f"Correct: {correct.tolist()}", flush=True)
-
         loss = F.cross_entropy(
             output.view(-1, output.size(-1)), target.view(-1), ignore_index=self.config["ignore_index"]
         )
         return loss
 
-    """
-    def accuracy_fn(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        pred = output.argmax(dim=-1)  # (B, T)
-        mask = target != -100  # (B, T)
-
-        # find the last position of each sequence in the batch
-        last_indices = mask.float().cumsum(dim=1)  # (B, T)
-        last_pos = last_indices == last_indices.max(dim=1, keepdim=True).values  # one-hot (B, T)
-
-        # get the predictions and targets at the last position
-        final_preds = pred[last_pos]
-        final_tgts = target[last_pos]
-
-        accuracy = (final_preds == final_tgts).float().mean()
-        return accuracy
-    """
-
     def accuracy_fn(self, output_idx: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        # pad_token_id = 0
         eos_token_id = 3
-        batch_size, seq_len = output_idx.shape
-
-        """
-        id2tok = {0: "<pad>", 1: "<cls>", 2: "<sep>", 3: "<eos>", 4: "|", 5: ","}
-        alphabet = "abcdefghijklmnopqrstuvwxyz"
-        for i in range(26):
-            id2tok[i + 6] = alphabet[i]
-        for i in range(200):
-            id2tok[i + 32] = str(i)
-        id2tok[-100] = str(-100)
-        output_strings = []
-        for seq in output_idx.tolist():
-            tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
-            output_strings.append(" ".join(tokens))
-        for i, s in enumerate(output_strings):
-            print(f"input [{i}] {s}", flush=True)
-        """
-        # target_strings = []
-        # for seq in target.tolist():
-        #    tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
-        #    target_strings.append(" ".join(tokens))
-        # for i, s in enumerate(target_strings):
-        #    print(f"tgt [{i}] {s}", flush=True)
-        # print(target.tolist(), flush=True)
+        batch_size, _ = output_idx.shape
 
         eos_mask = output_idx == eos_token_id
         first_eos_idx = eos_mask.float().cumsum(dim=1).eq(1).float().argmax(dim=1)
         pred_idx = (first_eos_idx - 1).clamp(min=0)
 
-        # eos_mask = target == eos_token_id
-        # first_eos_idx = eos_mask.float().cumsum(dim=1).eq(1).float().argmax(dim=1)
-        # tgt_idx = (first_eos_idx - 1).clamp(min=0)
-
         final_preds = output_idx[torch.arange(batch_size), pred_idx]
-        # final_tgts = target[torch.arange(batch_size), tgt_idx]
         final_tgts = target
 
         accuracy = (final_preds == final_tgts).float().mean()
@@ -268,7 +215,7 @@ class EditDistanceTaskChain(GeneralizationTask):
 
 
 if __name__ == "__main__":
-    task = EditDistanceTask()  # LongestCommonSubsequenceTask()
+    task = EditDistanceTask()
     dataset = PairwiseAlignmentDataset(task.config, split="test")
     for i in range(5):
         inp, tgt = dataset[i]

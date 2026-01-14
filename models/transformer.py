@@ -115,11 +115,6 @@ class GPT(nn.Module):
             )
         )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        # with weight tying when using torch.compile() some warnings get generated:
-        # "UserWarning: functional_call was passed multiple values for tied weights.
-        # This behavior is deprecated and will be an error in future versions"
-        # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_head.weight  # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
@@ -190,6 +185,9 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
+
+
+# Looped Transformer
 
 
 @dataclass
@@ -300,3 +298,47 @@ class LoopedTF(nn.Module):
     def get_num_params(self):
         n_params = sum(p.numel() for p in self.parameters())
         return n_params
+
+
+# Continuous Thought
+
+
+@dataclass
+class CTConfig(GPTConfig):
+    n_step: int = 4  # number of latent steps
+    is_causal: bool = True
+
+
+class CT(GPT):
+    def __init__(self, config: CTConfig):
+        super().__init__(config)
+        self.config = config
+
+    def forward(self, idx, **kwargs):
+        device = idx.device
+        b, t = idx.size()
+        assert (
+            t <= self.config.block_size
+        ), f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        pos = torch.arange(0, t + self.config.n_step, dtype=torch.long, device=device)
+
+        # forward the GPT model itself
+        tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        pos_emb = self.transformer.wpe(pos)
+        inp_x = self.transformer.drop(tok_emb + pos_emb[:t, :])
+        x = inp_x
+
+        for step_idx in range(self.config.n_step):
+            for block in self.transformer.h:
+                x = block(x)
+            x = self.transformer.ln_f(x)
+            # concecate the last token's hidden state to all tokens' hidden states
+            last_token_state = x[:, -1:, :]  # (b, 1, n_embd)
+            # add positional embedding to last_token_state
+            last_token_state += pos_emb[t + step_idx : t + step_idx + 1, :].unsqueeze(0)  # (1, 1, n_embd)
+            # concatenate
+            x = torch.cat([inp_x, last_token_state.expand(b, -1, -1)], dim=1)  # (b, t+1, n_embd)
+            inp_x = x  # update inp_x for next step
+
+        logits = self.lm_head(x)
+        return logits

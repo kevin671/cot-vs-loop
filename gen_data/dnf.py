@@ -1,6 +1,6 @@
 import random
 
-from tasks.dnf import *
+from tasks.counting.dnf import *
 
 
 def make_dataset(path: str, n: int, m: int, w: int, seed: int = 123, NUM_EXAMPLES: int = 120):

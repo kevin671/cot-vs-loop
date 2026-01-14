@@ -3,9 +3,7 @@ from torch import optim
 from transformers import get_scheduler
 
 
-def set_optimizer_scheduler(
-    model, args, dataloader
-) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
+def set_optimizer_scheduler(model, args, dataloader) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
@@ -27,3 +25,30 @@ def set_optimizer_scheduler(
         num_training_steps=len(dataloader) * args.epoch,
     )
     return optimizer, scheduler
+
+
+# https://github.com/facebookresearch/coconut/blob/main/utils.py
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+import os
+import random
+
+import numpy as np
+import torch
+
+
+class Config:
+    # to access a dict with object.key
+    def __init__(self, dictionary):
+        self.__dict__ = dictionary
+
+
+def set_seed(seed_value):
+    random.seed(seed_value)
+    np.random.seed(seed_value)
+    torch.manual_seed(seed_value)
+    os.environ["PYTHONHASHSEED"] = str(seed_value)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False

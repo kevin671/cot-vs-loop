@@ -289,21 +289,6 @@ if __name__ == "__main__":
     m = NUM_CLAUSES
     w = CLAUSE_WIDTH
 
-    """
-    dnf = gen_random_dnf(n, m, w, random.Random())
-    for conj in dnf:
-        print(" AND ".join([f"{'' if not is_neg else '-'}x{var_idx}" for var_idx, is_neg in conj]))
-    print(dnf)
-
-    # from tasks.dnf import klm_dnf_count
-
-    estimate = klm_dnf_count(dnf, n, tau=100)
-    print("Estimate:", estimate)
-
-    exact = exact_dnf_count(dnf, n)
-    print("Exact:", exact)
-    """
-
     task = DNFCountTask(n=n, m=m, w=w, chain=False)
     # dataset = DNFCountOnlineDataset(task.config, split="test", seed=42)
     dataset = DNFCountOfflineDataset(task.config, split="test", seed=42)

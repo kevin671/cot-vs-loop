@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict
 
 import numpy as np
 import torch
@@ -63,15 +63,7 @@ class ReachabilityDataset(CurriculumDataset):
 
                         if split == "train":
                             cot_len = config["cot_length"]
-                            # cot_raw = cot.split()
                             cot_tokens = [int(n) if n.isdigit() else n for pair in cot.split() for n in pair.split(",")]
-                            # cot_tokens = []
-                            # for _edge in cot_raw:
-                            #    for node in _edge.split(","):
-                            #        if node.isdigit():
-                            #            cot_tokens.append(f"v{node}")
-                            #        else:
-                            #            cot_tokens.append(node)  # "N"
 
                             total_len = len(cot_tokens)
                             if cot_len is None:
@@ -118,7 +110,6 @@ class ReachabilityTask(GeneralizationTask):
         max_n = max_input_size
         self.config = {
             "name": "reachability",
-            "description": "Predict s→t reachability from a tokenised graph.",
             "data_dir": "data/path",
             "max_input_size": max_n,
             "min_input_size": 8,
@@ -148,7 +139,6 @@ class ReachabilityTaskChain(GeneralizationTaskChain):
         max_n = max_input_size
         config = {
             "name": "reachability",
-            "description": "Predict s→t reachability from a tokenised graph.",
             "data_dir": "data/path",
             "max_input_size": max_n,
             "min_input_size": max_n,
@@ -159,48 +149,6 @@ class ReachabilityTaskChain(GeneralizationTaskChain):
         config["max_length"] = max_n * max_n  # not strictly but practically sufficient
         config["cot_length"] = cot_length
         self.config = config
-
-    """
-    def accuracy_fn(self, output_idx: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        eos_token_id = self.config["eos_token_id"]
-        batch_size, seq_len = output_idx.shape
-
-        # tok2id: Dict[str, int] = {"<pad>": 0, "TRUE": 1, "FALSE": 2, "N": 3, "<eos>": 4, "|": 5}
-        # vertices
-        # for i in range(self.config["max_input_size"]):
-        #    tok2id[i] = len(tok2id)
-
-        # id2tok = {v: k for k, v in tok2id.items()}
-        id2tok = {0: "<pad>", 1: "TRUE", 2: "FALSE", 3: "N", 4: "<eos>", 5: "|"}
-        for i in range(self.config["max_input_size"]):
-            id2tok[i + 6] = str(i)
-        id2tok[-100] = str(-100)
-
-        output_strings = []
-        for seq in output_idx.tolist():
-            tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
-            output_strings.append(" ".join(tokens))
-        for i, s in enumerate(output_strings):
-            print(f"input [{i}] {s}", flush=True)
-
-        # target_strings = []
-        # for seq in target.tolist():
-        #    tokens = [id2tok.get(tid, f"<unk:{tid}>") for tid in seq]
-        #    target_strings.append(" ".join(tokens))
-        # for i, s in enumerate(target_strings):
-        #    print(f"tgt [{i}] {s}", flush=True)
-        # print(target.tolist(), flush=True)
-
-        eos_mask = output_idx == eos_token_id
-        first_eos_idx = eos_mask.float().cumsum(dim=1).eq(1).float().argmax(dim=1)
-        pred_idx = (first_eos_idx - 1).clamp(min=0)
-
-        final_preds = output_idx[torch.arange(batch_size), pred_idx]
-        final_tgts = target
-
-        accuracy = (final_preds == final_tgts).float().mean()
-        return accuracy
-    """
 
 
 if __name__ == "__main__":
