@@ -146,7 +146,7 @@ def write_example(f, tokens, history_only=False):
 
 
 if __name__ == "__main__":
-    min_depth = 36
+    min_depth = 16
     base_dir = args.data_dir
     if args.make_chain:
         if args.under:

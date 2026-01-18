@@ -39,7 +39,7 @@ def set_optimizer_scheduler(model, args, steps_per_epoch=10_000):
     scheduler = get_scheduler(
         name="linear",
         optimizer=optimizer,
-        num_warmup_steps=1000,
+        num_warmup_steps=0,
         num_training_steps=steps_per_epoch * args.epoch,
     )
     return optimizer, scheduler
@@ -69,21 +69,22 @@ def main():
     parser.add_argument("--n_step", type=int, default=4)
     parser.add_argument("--n_eval_loop", type=int, default=None)
     parser.add_argument("--is_causal", action="store_true")
-    parser.add_argument("--use_rope", action="store_true")
 
     parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="./output")
     parser.add_argument("--val_interval", type=int, default=10)
     parser.add_argument("--chain", action="store_true")
 
-    parser.add_argument("--num_mc_samples", type=int, default=100)
+    parser.add_argument("--num_mc_samples", type=int, default=50000)
+
+    parser.add_argument("--coloring_mcmc_steps", type=int, default=30)
 
     args = parser.parse_args()
     print(args)
 
     assert args.task in ("dnf", "coloring")
 
-    set_seed(42)
+    set_seed(12)
     os.makedirs("./output", exist_ok=True)
 
     if args.task == "dnf":
@@ -101,9 +102,10 @@ def main():
         # use num_vars as number of nodes, num_clauses as degree
         from tasks.counting.coloring import ColoringsDataset, ColoringTask
 
-        n = args.num_vars
-        d = args.num_clauses
-        task = ColoringTask(n=n, d=d)
+        n = 3
+        d = 2
+        steps = args.coloring_mcmc_steps
+        task = ColoringTask(n=n, d=d, steps=steps, chain=args.chain)
         print(task.config)
 
     if args.task == "dnf":
@@ -121,20 +123,14 @@ def main():
         # ColoringsDataset yields ((input_coloring, edge_index), target_coloring)
         from tasks.counting.coloring import ColoringsDataset
 
-        train_dataset = ColoringsDataset(task.config, split="train")
-        test_dataset = ColoringsDataset(task.config, split="test")
+        train_dataset = ColoringsDataset(task.config, split="train", chain=args.chain)
+        test_dataset = ColoringsDataset(task.config, split="test", chain=False)  #  chain=args.chain)
 
-        def coloring_collate(batch):
-            # batch: [ ((input_coloring, edge_index), target), ... ]
-            inputs = [item[0][0] for item in batch]
-            targets = [item[1] for item in batch]
-            # stack
-            return torch.stack(inputs, dim=0), torch.stack(targets, dim=0)
+        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size)
+        test_batch_size = args.batch_size * 2  # * 8
+        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=test_batch_size)
 
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=args.batch_size, collate_fn=coloring_collate
-        )
-        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, collate_fn=coloring_collate)
+    ignore_index = task.config.get("ignore_index", -100)
 
     # Model
     model = build_model(args, task)
@@ -161,7 +157,7 @@ def main():
             #    inputs = inputs[:, -(epoch + 1) :]
 
             logits = model(inputs)
-            loss = task.pointwise_loss_fn(logits, y)
+            loss = task.pointwise_loss_fn(logits, y, ignore_index=ignore_index)
 
             optimizer.zero_grad()
             loss.backward()
@@ -171,14 +167,17 @@ def main():
                 lr = optimizer.param_groups[0]["lr"]
                 wandb.log({"loss": loss.item(), "lr": lr})
 
-        n_test = 100
+        if args.task == "dnf":
+            n_test = 100
+        else:
+            n_test = 1
         tau = args.num_mc_samples
-        if (epoch + 1) % args.val_interval == 0 or epoch == args.epoch - 1:
+        # if (epoch + 1) % args.val_interval == 0 or epoch == args.epoch - 1:
 
-            # save model
-            out_dir = os.path.join(args.output_dir, wandb.run.id)
-            os.makedirs(out_dir, exist_ok=True)
-            torch.save(model.state_dict(), f"{out_dir}/latest.pt")
+        # save model
+        out_dir = os.path.join(args.output_dir, wandb.run.id)
+        os.makedirs(out_dir, exist_ok=True)
+        torch.save(model.state_dict(), f"{out_dir}/latest.pt")
 
         # evaluate
         model.eval()
@@ -212,19 +211,86 @@ def main():
                 print(f"Epoch {epoch + 1}, Test Accuracy: {avg_acc}")
 
             else:
-                # TODO: sampling and histogram with total variation distance
-                total_acc = 0.0
-                n_test_samples = n_test
-                loader = islice(test_loader, n_test_samples) if args.chain else islice(test_loader, n_test_samples)
-                for input_ids, target in tqdm(loader, total=n_test_samples):
-                    inputs = input_ids.cuda()
-                    target = target.cuda()
-                    logit = model(inputs)
-                    preds = logit.argmax(dim=-1)
-                    acc = (preds == target).float().mean().item()
-                    total_acc += acc
-                avg_acc = total_acc / n_test_samples
-                print(f"Epoch {epoch + 1}, coloring per-node accuracy: {avg_acc}")
+                # Sampling-based evaluation: draw multiple samples per instance,
+                # build histogram of full colorings and print simple summaries.
+                from collections import Counter
+
+                loader = islice(test_loader, n_test) if args.chain else test_loader
+
+                # access vocabulary mapping from dataset
+                dataset = test_loader.dataset
+                inv_tok = {v: k for k, v in dataset.tok2id.items()}
+                eos_token_id = dataset.tok2id["<eos>"]
+
+                for input_ids, labels in tqdm(loader, total=n_test if args.chain else len(test_loader)):
+
+                    tau = args.num_mc_samples // test_batch_size + 1
+                    counts = Counter()
+
+                    for _ in tqdm(range(tau), total=tau):
+                        batch_input = input_ids.cuda()
+
+                        idx = model.generate(batch_input, max_new_tokens=task.config["max_length"])
+                        # handle batched outputs: iterate over each generated sequence
+                        batch_size = idx.size(0)
+                        seq_len = idx.size(1)
+                        for b in range(batch_size):
+                            row = idx[b]
+                            eos_positions = (row == eos_token_id).nonzero(as_tuple=True)[0]
+                            if eos_positions.numel() > 0:
+                                first_eos = eos_positions[0].item()
+                            else:
+                                first_eos = seq_len - 1
+
+                            start = max(0, first_eos - task.config["n"])
+                            gen = row[start:first_eos].cpu()
+
+                            toks = [inv_tok[int(t.item())] for t in gen]
+                            key = tuple(toks)
+                            counts[key] += 1
+
+                    # summarize histogram
+                    import matplotlib.pyplot as plt
+
+                    keys = list(counts.keys())
+                    values = [counts[k] for k in keys]
+                    print("Sampled distribution:", keys, values, flush=True)
+                    plt.bar(range(len(keys)), values)
+                    plt.xticks(range(len(keys)), [str(k) for k in keys], rotation=90)
+                    plt.tight_layout()
+                    plt.savefig(f"{out_dir}/coloring_histogram_{wandb.run.id}.png")
+
+                    ### total variation distance vs uniform over true answer support
+                    true_colorings = dataset.enumeration
+                    # build support as tuples of string tokens
+                    # true_keys = [tuple(str(c) for c in coloring) for coloring in true_colorings]
+                    # ('0=', 'col0', '1=', 'col4', '2=', 'col2'
+                    true_keys = []
+                    for coloring in true_colorings:
+                        toks = []
+                        for node_idx, color in enumerate(coloring):
+                            # toks.append(f"{node_idx}=")
+                            toks.append(f"col{color}")
+                        true_keys.append(tuple(toks))
+
+                    support = set(true_keys)
+                    print(support, flush=True)
+
+                    total_count = sum(values)
+                    # consider union of sampled keys and true support so missing keys are counted
+                    union_keys = set(counts.keys()) | support
+                    n_support = len(support) if len(support) > 0 else 1
+                    p_true_uniform = 1.0 / n_support
+
+                    tvd = 0.0
+                    for k in union_keys:
+                        p_hat = counts.get(k, 0) / total_count if total_count > 0 else 0.0
+                        p_true = p_true_uniform if k in support else 0.0
+                        tvd += abs(p_hat - p_true)
+
+                    tvd *= 0.5
+
+                    print(f"Total Variation Distance (vs uniform over support size {n_support}): {tvd}", flush=True)
 
 
 if __name__ == "__main__":

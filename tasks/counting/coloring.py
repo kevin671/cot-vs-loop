@@ -39,6 +39,10 @@ class ColoringsDataset(IterableDataset):
         else:
             self.edges = torch.empty((2, 0), dtype=torch.long)
 
+        # self.counts = count_proper_colorings(self.G, self.k)
+        self.enumeration = list(enumerate_proper_colorings(self.G, self.k))
+        self.counts = len(self.enumeration)
+
     def _build_vocab(self) -> None:
         """Build a simple token->id mapping for textified graph + color sequences."""
         self.tok2id: Dict[str, int] = {}
@@ -47,6 +51,7 @@ class ColoringsDataset(IterableDataset):
         # special tokens
         add("<pad>")
         add("<sep>")
+        add("<state>")
         add("<eos>")
         add("A1")
         add("A0")
@@ -93,7 +98,12 @@ class ColoringsDataset(IterableDataset):
                 # Input: (initial_coloring, edge_index, history_seq)
                 # Build a single sequence of triplets: (v,c,a),(v,c,a),...
                 hist_list: list[int] = []
-                for v, c, a in history:
+                for entry in history:
+                    # history entries may be (v, c, a) or (v, c, a, coloring_snapshot)
+                    if len(entry) >= 3:
+                        v, c, a = entry[0], entry[1], entry[2]
+                    else:
+                        continue
                     hist_list.extend([v, c, a])
 
                 history_seq = torch.tensor(hist_list, dtype=torch.long)
@@ -107,7 +117,7 @@ class ColoringsDataset(IterableDataset):
                     nbrs = sorted(list(self.G.neighbors(v)))
                     for u in nbrs:
                         tokens.append(str(u))
-                    tokens.append("<sep>")
+                    # tokens.append("<sep>")
 
                 # Initial coloring
                 tokens.append("<sep>")
@@ -118,20 +128,33 @@ class ColoringsDataset(IterableDataset):
                 # mark boundary before history
                 input_before_history_len = len(tokens)
 
-                # History: (v,c,a) triples
-                tokens.append("<sep>")
-                for v, c, a in history:
+                # History: (v,c,a) triples, optionally including a full coloring snapshot
+                for entry in history:
+                    # tokens.append("<sep>")
+                    if len(entry) >= 3:
+                        v, c, a = entry[0], entry[1], entry[2]
+                    else:
+                        continue
                     tokens.append(str(v))
                     tokens.append(f"col{c}")
                     tokens.append("A1" if a else "A0")
+                    # If a coloring snapshot is provided, append it after the triplet
+                    if len(entry) >= 4:
+                        snapshot = entry[3]
+                        # tokens.append("<state>")
+                        for vv, col in enumerate(snapshot):
+                            # tokens.append(f"{vv}=")
+                            tokens.append(f"col{col}")
 
                 # Final coloring (target) appended to input so we can train next-token prediction
-                tokens.append("<sep>")
-                for v, col in enumerate(coloring):
-                    tokens.append(f"{v}=")
-                    tokens.append(f"col{col}")
+                # tokens.append("<sep>")
+                # for v, col in enumerate(coloring):
+                #    tokens.append(f"{v}=")
+                #    tokens.append(f"col{col}")
 
-                tokens.append("<eos>")
+                # Do not include <eos> in the input tokens; keep it only as a label target
+
+                # print(tokens)
 
                 input_ids = torch.tensor([self.tok2id.get(t, self.tok2id["<pad>"]) for t in tokens], dtype=torch.long)
 
@@ -142,13 +165,8 @@ class ColoringsDataset(IterableDataset):
                 shifted[-1] = self.tok2id["<eos>"]
                 # we want the model to predict the sequence starting at the first token of final coloring
                 # find position of the separator before final coloring: it's the last '<sep>' before final
-                final_start = None
-                for i in range(len(tokens) - 1, -1, -1):
-                    if tokens[i] == "<sep>":
-                        final_start = i + 1
-                        break
-                if final_start is None:
-                    final_start = input_before_history_len
+                # For chain mode, start labels at the beginning of the history
+                final_start = input_before_history_len
 
                 labels[final_start:] = shifted[final_start:]
 
@@ -170,13 +188,16 @@ class ColoringsDataset(IterableDataset):
                     tokens.append(f"col{col}")
 
                 # mark start of final coloring
-                final_start = len(tokens) + 1
+                final_start = len(tokens)
+
                 tokens.append("<sep>")
                 for v, col in enumerate(coloring):
                     tokens.append(f"{v}=")
                     tokens.append(f"col{col}")
 
-                tokens.append("<eos>")
+                # print(tokens)
+
+                # Do not include <eos> in the input tokens; keep it only as a label target
 
                 input_ids = torch.tensor([self.tok2id.get(t, self.tok2id["<pad>"]) for t in tokens], dtype=torch.long)
                 labels = torch.full_like(input_ids, fill_value=self.ignore_index)
@@ -268,6 +289,7 @@ def run_mcmc(
             raise ValueError("Initial coloring is not proper.")
 
     accepted = 0
+    # history entries: (v, c, a) or (v, c, a, coloring_snapshot)
     history: List[tuple] = []
 
     for _ in range(steps):
@@ -277,7 +299,8 @@ def run_mcmc(
         if accepted_flag:
             accepted += 1
         if record_history:
-            history.append((v, c, 1 if accepted_flag else 0))
+            # store a copy of the current coloring snapshot along with the move
+            history.append((v, c, 1 if accepted_flag else 0, coloring.copy()))
 
     acceptance_rate = accepted / steps
     if record_history:
@@ -289,6 +312,18 @@ def count_proper_colorings(G: nx.Graph, k: int) -> int:
     """Count exact number of proper k-colorings via backtracking.
 
     This is exponential in general and suitable for small graphs (n ~< 20).
+    """
+    # Implemented via a shared backtracking generator so callers can either
+    # enumerate all colorings or just count them.
+    return sum(1 for _ in enumerate_proper_colorings(G, k))
+
+
+def enumerate_proper_colorings(G: nx.Graph, k: int):
+    """Generate all proper k-colorings for G.
+
+    Yields lists of length n (where n = number of nodes), giving the color
+    assigned to each vertex in the order returned by `list(G.nodes())`.
+    This is exponential and intended for small graphs (n ~< 20).
     """
     # Map nodes to indices 0..n-1
     nodes = list(G.nodes())
@@ -303,33 +338,51 @@ def count_proper_colorings(G: nx.Graph, k: int) -> int:
 
     assigned = [-1] * n
 
-    def dfs(pos: int) -> int:
+    def dfs(pos: int):
         if pos == n:
-            return 1
+            yield assigned.copy()
+            return
         v = order[pos]
         used = {assigned[u] for u in neighbors[v] if assigned[u] != -1}
-        total = 0
         for c in range(k):
             if c in used:
                 continue
             assigned[v] = c
-            total += dfs(pos + 1)
+            yield from dfs(pos + 1)
             assigned[v] = -1
-        return total
 
-    return dfs(0)
+    yield from dfs(0)
 
 
 class ColoringTask(GeneralizationTask):
-    def __init__(self, n: int, d: int):
+    def __init__(self, n: int, d: int, steps: int, chain: bool = False):
         super().__init__()
         k = 2 * d + 1
+        # Estimate vocabulary size and a conservative maximum sequence length.
+        # Vocabulary: 6 special tokens + 3 tokens per vertex ("v:", "v=", "v") + k color tokens
+        vocab_size = 6 + 3 * n + k
+
+        # Non-chain max length (edges + init + final): n*(d+2) + 1 + 2n + 1 + 2n = n*(d+6) + 2
+        max_len_nonchain = n * (d + 6) + 2
+
+        # Chain-mode conservative upper bound:
+        # initial part: edges (n*(d+1)) + sep(1) + init(2n) = n*(d+3) + 1
+        # per history entry worst-case (with snapshot): 1(<sep>)+1(v)+1(col)+1(Ax)+1(<state>)+2n = 5 + 2n
+        # per_entry = 5 + 2 * n
+        per_entry = 3 + n
+        max_len_chain = n * (d + 3) + 1 + steps * per_entry
+
+        max_length = max(max_len_nonchain, max_len_chain)
+
+        print(f"ColoringTask: n={n}, d={d}, k={k}, vocab_size={vocab_size}, max_length={max_length}")
+
         self.config = {
             "n": n,
             "d": d,
             "k": k,
-            "max_length": n,
-            "vocab_size": k,
+            "max_length": int(max_length) if chain else int(max_len_nonchain),
+            "vocab_size": int(vocab_size),
+            "steps_per_sample": steps,
             "ignore_index": -100,
         }
 
@@ -338,7 +391,7 @@ class ColoringTask(GeneralizationTask):
 
 if __name__ == "__main__":
     # Graph parameters
-    n = 4  # number of vertices
+    n = 3  # number of vertices
     d = 2  # degree (low-degree regular)
     seed = 0
 
@@ -346,25 +399,67 @@ if __name__ == "__main__":
     k = 2 * d + 1
 
     # MCMC parameters
-    steps = 1000  # _000
+    steps = 40  # _000
 
     # Debug
     # Generate d-regular graph
     G = nx.random_regular_graph(d, n, seed=seed)
 
     # count exact number of proper colorings (for small n)
-    exact_count = count_proper_colorings(G, k)
+    # exact_count = count_proper_colorings(G, k)
+
+    enumeration = list(enumerate_proper_colorings(G, k))
+    # print(enumeration[0]) # [0, 1, 2]
+    exact_count = len(enumeration)
+
     print(f"Exact number of proper {k}-colorings: {exact_count}")
 
     print(f"Generated {d}-regular graph with n={n}")
     print(f"Max degree: {max(dict(G.degree()).values())}")
     print(f"Using k={k} colors")
 
-    # Run Glauber dynamics
-    final_coloring, acc_rate = run_mcmc(G, k, steps, seed=seed)
+    # Run sequential MCMC chains and collect final colorings
+    runs = 50000
+    results = []
+    for i in range(runs):
+        s = seed + i + 1
+        final_coloring, acc_rate = run_mcmc(G, k, steps, seed=s)
+        results.append((tuple(final_coloring), acc_rate))
 
-    print("Final coloring (first 20 vertices):", final_coloring[:20])
-    print("Acceptance rate:", acc_rate)
+    colorings = [r[0] for r in results]
 
+    from collections import Counter
+
+    freq = Counter(colorings)
+
+    print(f"Collected {len(colorings)} samples from MCMC.")
+
+    import matplotlib.pyplot as plt
+
+    keys = list(freq.keys())
+    values = [freq[k] for k in keys]
+    print("Sampled distribution:", keys, values, flush=True)
+    plt.bar(range(len(keys)), values)
+    plt.xticks(range(len(keys)), [str(k) for k in keys], rotation=90)
+    plt.tight_layout()
+    plt.savefig("coloring_histogram.png")
+
+    """
     # Sanity check
     print("Proper coloring:", is_proper(G, final_coloring))
+
+    task = ColoringTask(n, d, steps)
+
+    print(task.config)
+
+    dataset = ColoringsDataset(task.config, split="train", chain=True)  # True)
+
+    # torch.set_printoptions(profile="full")
+
+    for i, (input_ids, labels) in enumerate(dataset):
+        print("Input IDs:", input_ids)
+        print("Labels:", labels)
+        print(input_ids.shape, labels.shape)
+        if i >= 0:
+            break
+    """

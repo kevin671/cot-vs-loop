@@ -10,9 +10,12 @@ from tasks.task import CurriculumDataset, GeneralizationTask, GeneralizationTask
 
 
 class ReachabilityDataset(CurriculumDataset):
-    def __init__(self, config, split="train", chain: bool = False):
+    def __init__(self, config, split="train", chain: bool = False, is_coconut: bool = False, lambda_distribution=None):
         super().__init__()
         self.config = config
+        self.split = split
+        self.chain = chain
+        self.is_coconut = is_coconut
 
         if chain:
 
@@ -59,10 +62,17 @@ class ReachabilityDataset(CurriculumDataset):
                         # edges = [int(n) for pair in edges.split() for n in pair.split(",")]
                         query = [int(n) for n in query.split(",")]
                         edges = edges.replace(" ", ",|,").split(",")  # if edges else []
+                        edges = [t for t in edges if t != ""]  # hot fix
                         edges = [int(t) if t != "|" else "|" for t in edges]
 
                         if split == "train":
                             cot_len = config["cot_length"]
+                            random_removal_offset = (
+                                torch.multinomial(lambda_distribution, 1).item()
+                                if lambda_distribution is not None
+                                else 0
+                            )
+                            cot_len = cot_len - random_removal_offset if cot_len is not None else None
                             cot_tokens = [int(n) if n.isdigit() else n for pair in cot.split() for n in pair.split(",")]
 
                             total_len = len(cot_tokens)
@@ -71,22 +81,32 @@ class ReachabilityDataset(CurriculumDataset):
                             elif total_len <= cot_len:
                                 sampled_cot = cot_tokens
                             else:
-                                indices = np.linspace(0, total_len - 1, cot_len, dtype=int).tolist()
-                                sampled_cot = [cot_tokens[i] for i in indices]
+                                # indices = np.linspace(0, total_len - 1, cot_len, dtype=int).tolist()
+                                # sampled_cot = [cot_tokens[i] for i in indices]
+                                sampled_cot = cot_tokens[-cot_len:]  # TODO
 
                             inp = edges + ["|"] + query
-                            tokens = inp + sampled_cot  # + [label]
-                            input_ids = [self.token2id[tok] for tok in tokens] + [
-                                int(label) + 1
-                            ]  # label: 1 for TRUE, 2 for FALSE
-                            label_ids = torch.tensor(input_ids[1:] + [self.token2id["<eos>"]], dtype=torch.long)
-                            label_ids[: len(inp) - 1] = config["ignore_index"]
-                            self.samples[d].append((torch.tensor(input_ids, dtype=torch.long), label_ids))
+                            if is_coconut:
+                                # store precomputed token ids for coconut mode
+                                inp_ids = [self.token2id[tok] for tok in inp]
+                                cot_ids = [self.token2id[tok] for tok in sampled_cot] + [int(label) + 1]
+                                self.samples[d].append((inp_ids, cot_ids, None))
+
+                            else:
+                                tokens = inp + sampled_cot
+                                # label: 1 for TRUE, 2 for FALSE
+                                input_ids = [self.token2id[tok] for tok in tokens] + [int(label) + 1]
+                                label_ids = torch.tensor(input_ids[1:] + [self.token2id["<eos>"]], dtype=torch.long)
+                                label_ids[: len(inp) - 1] = config["ignore_index"]
+                                self.samples[d].append((input_ids, label_ids))
 
                         else:
-                            tokens = edges + ["|"] + query
-                            ids = [self.token2id[tok] for tok in tokens]
-                            self.samples[d].append((ids, int(label) + 1))
+                            inp = edges + ["|"] + query
+                            inp_ids = [self.token2id[tok] for tok in inp]
+                            if is_coconut:
+                                self.samples[d].append((inp_ids, int(label) + 1))
+                            else:
+                                self.samples[d].append((inp_ids, int(label) + 1))
                     else:
                         verts, edges, query, label = line.rstrip().split("\t")
                         tokens = [query] + verts.split() + edges.split()
@@ -100,8 +120,27 @@ class ReachabilityDataset(CurriculumDataset):
 
     def __getitem__(self, idx: int):
         length = self.curriculum.sample_sequence_length() if self.curriculum else max(self.samples.keys())
-        ids, label = self.samples[length][idx]
-        return torch.tensor(ids, dtype=torch.long), torch.tensor(label, dtype=torch.long)
+        if self.chain:
+            if self.is_coconut:
+                if self.split == "train":
+                    inp_ids, cot_ids, _ = self.samples[length][idx]
+                    inp_tensor = torch.tensor(inp_ids, dtype=torch.long)
+                    cot_tensor = torch.tensor(cot_ids, dtype=torch.long)
+                    # tgt_tensor = tgt if isinstance(tgt, torch.Tensor) else torch.tensor(tgt, dtype=torch.long)
+                    return inp_tensor, cot_tensor, None  # tgt_tensor
+                else:
+                    ids, label = self.samples[length][idx]
+                    ids_tensor = ids if isinstance(ids, torch.Tensor) else torch.tensor(ids, dtype=torch.long)
+                    label_tensor = label if isinstance(label, torch.Tensor) else torch.tensor(label, dtype=torch.long)
+                    return ids_tensor, label_tensor
+            else:
+                ids, label = self.samples[length][idx]
+                ids_tensor = ids if isinstance(ids, torch.Tensor) else torch.tensor(ids, dtype=torch.long)
+                label_tensor = label if isinstance(label, torch.Tensor) else torch.tensor(label, dtype=torch.long)
+                return ids_tensor, label_tensor
+        else:
+            ids, label = self.samples[length][idx]
+            return torch.tensor(ids, dtype=torch.long), torch.tensor(label, dtype=torch.long)
 
 
 class ReachabilityTask(GeneralizationTask):

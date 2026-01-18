@@ -17,7 +17,7 @@ def build_model(args, task):
             **tf_config,
             n_loop=args.n_loop,
             is_causal=args.is_causal,
-            use_rope=args.use_rope,
+            # use_rope=args.use_rope,
         )
         if args.model == "Looped":
             model = LoopedTF(model_config)
@@ -25,7 +25,7 @@ def build_model(args, task):
             model = TimeModulatedLoopedTF(model_config)
 
     elif args.model == "CT":
-        tf_config["block_size"] += args.n_step
+        tf_config["block_size"] += args.n_step + 1
         model_config = CTConfig(**tf_config, n_step=args.n_step)
         model = CT(model_config)
 

@@ -9,9 +9,12 @@ from tasks.task import CurriculumDataset, GeneralizationTask, GeneralizationTask
 
 
 class ArithmeticExpressionDataset(CurriculumDataset):
-    def __init__(self, config, split="train", chain: bool = False):
+    def __init__(self, config, split="train", chain: bool = False, is_coconut: bool = False, lambda_distribution=None):
         super().__init__()
+        self.config = config
+        self.split = split
         self.chain = chain
+        self.is_coconut = is_coconut
         signs = ["+", "-", "*", "/", "(", ")", "="]
         num_range = config["num_range"]
         dictionary = {"<pad>": 0, "<cls>": 1, "<eos>": 2}
@@ -47,24 +50,49 @@ class ArithmeticExpressionDataset(CurriculumDataset):
                     if split == "train":
                         cot, ans = tokens[eq_pos + 1 : -1], tokens[-1]
                         cot_len = config["cot_length"]
+                        random_removal_offset = (
+                            torch.multinomial(lambda_distribution, 1).item() if lambda_distribution is not None else 0
+                        )
+                        cot_len = cot_len - random_removal_offset if cot_len is not None else None
                         total_len = len(cot)
                         if cot_len is None:
                             sampled_cot = cot
                         else:
-                            indices = np.linspace(0, total_len - 1, cot_len, dtype=int).tolist()
-                            sampled_cot = [cot[i] for i in indices]
-                        input_ids = inp + sampled_cot + [ans]
-                        input_ids = torch.tensor([dictionary[t] for t in input_ids], dtype=torch.long)
-                        label_ids = torch.tensor(input_ids[1:].tolist() + [dictionary["<eos>"]], dtype=torch.long)
-                        label_ids[:eq_pos] = config["ignore_index"]
-                        xs.append(input_ids)
-                        ys.append(label_ids)
+                            if cot_len >= total_len:
+                                sampled_cot = cot
+                            else:
+                                # indices = np.linspace(0, total_len - 1, cot_len, dtype=int).tolist()
+                                # sampled_cot = [cot[i] for i in indices]
+                                sampled_cot = cot[-cot_len:]  # TODO
+
+                        if self.is_coconut and split == "train":
+                            inp_ids = [dictionary[t] for t in inp]
+                            cot_ans_ids = [dictionary[t] for t in sampled_cot] + [dictionary[ans]]
+                            # build label ids (shifted) for training target
+                            input_ids = inp + sampled_cot + [ans]
+                            label_ids = torch.tensor(
+                                [dictionary[t] for t in input_ids][1:] + [dictionary["<eos>"]], dtype=torch.long
+                            )
+                            label_ids[:eq_pos] = config.get("ignore_index", -100)
+                            xs.append((inp_ids, cot_ans_ids, label_ids))
+                        else:
+                            input_ids = inp + sampled_cot + [ans]
+                            input_ids = torch.tensor([dictionary[t] for t in input_ids], dtype=torch.long)
+                            label_ids = torch.tensor(input_ids[1:].tolist() + [dictionary["<eos>"]], dtype=torch.long)
+                            label_ids[:eq_pos] = config["ignore_index"]
+                            xs.append(input_ids)
+                            ys.append(label_ids)
 
                     else:
                         label_id = tokens[-1]
                         input_ids = inp
-                        xs.append(torch.tensor([dictionary[t] for t in input_ids], dtype=torch.long))
-                        ys.append(torch.tensor(dictionary[label_id], dtype=torch.long))
+                        if self.is_coconut:
+                            ids = [dictionary[t] for t in input_ids]
+                            # no CoT available for eval split; store empty cot
+                            xs.append((ids, [], dictionary[label_id]))
+                        else:
+                            xs.append(torch.tensor([dictionary[t] for t in input_ids], dtype=torch.long))
+                            ys.append(torch.tensor(dictionary[label_id], dtype=torch.long))
                 else:
                     eq_pos = tokens.index("=")
                     seq = tokens[:eq_pos]
@@ -83,7 +111,18 @@ class ArithmeticExpressionDataset(CurriculumDataset):
             length = self.max_input_size
         else:
             length = self.curriculum.sample_sequence_length() if self.curriculum else self.max_input_size
+
         inp = self.X[length][idx]
+        if self.is_coconut and self.split == "train":
+            # entries stored as tuples (inp_ids, cot_ids, tgt)
+            if isinstance(inp, tuple) and len(inp) == 3:
+                inp_ids, cot_ids, tgt_ids = inp
+                inp_tensor = torch.tensor(inp_ids, dtype=torch.long)
+                cot_tensor = torch.tensor(cot_ids, dtype=torch.long)
+                tgt_tensor = tgt_ids if isinstance(tgt_ids, torch.Tensor) else torch.tensor(tgt_ids, dtype=torch.long)
+                return inp_tensor, cot_tensor, tgt_tensor
+            # fallback to legacy format
+
         tgt = self.Y[length][idx]
         return inp, tgt
 

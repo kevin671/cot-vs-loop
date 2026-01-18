@@ -13,3 +13,6 @@ binary/unigen
 *.ipynb
 checkpoints/
 *.sh
+*.out
+*.mypy_cache/
+tmp/

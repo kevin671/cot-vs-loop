@@ -299,6 +299,28 @@ class LoopedTF(nn.Module):
         n_params = sum(p.numel() for p in self.parameters())
         return n_params
 
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+        for _ in range(max_new_tokens):
+            # if the sequence context is growing too long we must crop it at block_size
+            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size :]
+            # forward the model to get the logits for the index in the sequence
+            # logits, _ = self(idx_cond)
+            logits = self(idx_cond)
+            # pluck the logits at the final step and scale by desired temperature
+            logits = logits[:, -1, :] / temperature
+            # optionally crop the logits to only the top k options
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float("Inf")
+            # apply softmax to convert logits to (normalized) probabilities
+            probs = F.softmax(logits, dim=-1)
+            # sample from the distribution
+            idx_next = torch.multinomial(probs, num_samples=1)
+            # append sampled index to the running sequence and continue
+            idx = torch.cat((idx, idx_next), dim=1)
+
+        return idx
+
 
 # Continuous Thought
 
@@ -314,31 +336,106 @@ class CT(GPT):
         super().__init__(config)
         self.config = config
 
-    def forward(self, idx, **kwargs):
-        device = idx.device
-        b, t = idx.size()
-        assert (
-            t <= self.config.block_size
-        ), f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        pos = torch.arange(0, t + self.config.n_step, dtype=torch.long, device=device)
+    def forward(self, input_idx, cot_idx, n_latent_steps=None):
+
+        n_steps = self.config.n_step if n_latent_steps is None else n_latent_steps
+        assert 0 <= n_steps <= self.config.n_step
+
+        device = input_idx.device
+        b, ti = input_idx.size()
+        bc, tc = cot_idx.size()
+        assert b == bc
+        t = ti + tc
+        assert t + n_steps <= self.config.block_size
+        pos = torch.arange(0, t + n_steps, dtype=torch.long, device=device)
 
         # forward the GPT model itself
-        tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        tok_emb = self.transformer.wte(input_idx)  # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos)
-        inp_x = self.transformer.drop(tok_emb + pos_emb[:t, :])
-        x = inp_x
+        inp_x = self.transformer.drop(tok_emb + pos_emb[:ti, :])
 
-        for step_idx in range(self.config.n_step):
+        # Continuous Thought steps
+        for step_idx in range(n_steps):
+            x = inp_x
             for block in self.transformer.h:
                 x = block(x)
             x = self.transformer.ln_f(x)
-            # concecate the last token's hidden state to all tokens' hidden states
             last_token_state = x[:, -1:, :]  # (b, 1, n_embd)
-            # add positional embedding to last_token_state
-            last_token_state += pos_emb[t + step_idx : t + step_idx + 1, :].unsqueeze(0)  # (1, 1, n_embd)
-            # concatenate
-            x = torch.cat([inp_x, last_token_state.expand(b, -1, -1)], dim=1)  # (b, t+1, n_embd)
-            inp_x = x  # update inp_x for next step
+            next_emb = last_token_state + pos_emb[ti + step_idx : ti + step_idx + 1, :].unsqueeze(0)
+            # x = torch.cat([x, next_emb], dim=1)  # (b, t+1, n_embd)
+            inp_x = torch.cat([inp_x, next_emb], dim=1)  # (b, t+1, n_embd)
+
+        # Chain-of-Thought steps (optional)
+        if tc > 0:
+            cot_emb = self.transformer.wte(cot_idx)  # (b, tc, n_embd)
+            cot_x = self.transformer.drop(cot_emb + pos_emb[ti + n_steps : ti + n_steps + tc, :])
+            # x = torch.cat([x, cot_x], dim=1)  # (b, t+1+tc, n_embd)
+            inp_x = torch.cat([inp_x, cot_x], dim=1)  # (b, t+1+tc, n_embd)
+
+        x = inp_x
+        for block in self.transformer.h:
+            x = block(x)
+        x = self.transformer.ln_f(x)
 
         logits = self.lm_head(x)
+        logits = torch.cat([logits[:, : ti - 1, :], logits[:, ti + n_steps - 1 :, :]], dim=1)
+
         return logits
+
+    @torch.no_grad()
+    def generate(self, input_idx, max_new_tokens, temperature=1.0, top_k=None, n_latent_steps=None):
+        """
+        Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
+        the sequence max_new_tokens times, feeding the predictions back into the model each time.
+        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
+        """
+
+        idx = input_idx
+
+        # Continuous Thought generation
+
+        n_steps = self.config.n_step if n_latent_steps is None else n_latent_steps
+        assert 0 <= n_steps <= self.config.n_step
+
+        device = input_idx.device
+        b, t = input_idx.size()
+        assert t + n_steps <= self.config.block_size
+        pos = torch.arange(0, t + n_steps + max_new_tokens, dtype=torch.long, device=device)
+
+        # forward the GPT model itself
+        tok_emb = self.transformer.wte(input_idx)  # token embeddings of shape (b, t, n_embd)
+        pos_emb = self.transformer.wpe(pos)
+        inp_x = self.transformer.drop(tok_emb + pos_emb[:t, :])
+
+        for step_idx in range(n_steps):
+            x = inp_x
+            for block in self.transformer.h:
+                x = block(x)
+            x = self.transformer.ln_f(x)
+            last_token_state = x[:, -1:, :]  # (b, 1, n_embd)
+            next_emb = last_token_state + pos_emb[t + step_idx : t + step_idx + 1, :].unsqueeze(0)
+            inp_x = torch.cat([inp_x, next_emb], dim=1)  # (b, t+1, n_embd)
+
+        for io in range(max_new_tokens):
+            x = inp_x
+            for block in self.transformer.h:
+                x = block(x)
+            x = self.transformer.ln_f(x)
+            logits = self.lm_head(x)
+
+            # pluck the logits at the final step and scale by desired temperature
+            logits = logits[:, -1, :] / temperature
+            # optionally crop the logits to only the top k options
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float("Inf")
+            # apply softmax to convert logits to (normalized) probabilities
+            probs = F.softmax(logits, dim=-1)
+            # sample from the distribution
+            idx_next = torch.multinomial(probs, num_samples=1)
+            # append sampled index to the running sequence and continue
+            idx = torch.cat((idx, idx_next), dim=1)
+            next_emb = self.transformer.wte(idx_next) + pos_emb[t + n_steps + io : t + n_steps + io + 1, :].unsqueeze(0)
+            inp_x = torch.cat([inp_x, next_emb], dim=1)  # (b, t+1, n_embd)
+
+        return idx

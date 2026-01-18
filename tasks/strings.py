@@ -5,14 +5,19 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
-from tasks.task import CurriculumDataset, GeneralizationTask
+from tasks.task import CurriculumDataset, GeneralizationTask, GeneralizationTaskChain
 
 
 class PairwiseAlignmentDataset(CurriculumDataset):
-    def __init__(self, config, split="train", chain: bool = False) -> None:
+    def __init__(
+        self, config, split="train", chain: bool = False, is_coconut: bool = False, lambda_distribution=None
+    ) -> None:
         super().__init__()
         self.config = config
+        self.split = split
         self.max_input_size = config["max_input_size"]
+        self.chain = chain
+        self.is_coconut = is_coconut
 
         def build_fixed_vocab(config):
             tok2id: Dict[str, int] = {"<pad>": 0, "<cls>": 1, "<sep>": 2, "<eos>": 3, "|": 4, ",": 5}
@@ -49,6 +54,10 @@ class PairwiseAlignmentDataset(CurriculumDataset):
         self.X, self.Y = {}, {}
         if chain:
             cot_len = config["cot_length"] or config["max_length"] + 1
+            random_removal_offset = (
+                torch.multinomial(lambda_distribution, 1).item() if lambda_distribution is not None else 0
+            )
+            cot_len = cot_len - random_removal_offset if cot_len is not None else None
             for length, lines in raw.items():
                 xs, ys = [], []
                 for tokens in lines:
@@ -66,13 +75,11 @@ class PairwiseAlignmentDataset(CurriculumDataset):
                         if total_len <= cot_len:
                             sampled_cot = cot
                         else:
-                            indices = [int(i * total_len / cot_len) for i in range(cot_len)]
-                            sampled_cot = [cot[i] for i in indices]
-                            assert len(sampled_cot) == cot_len
+                            sampled_cot = cot[-cot_len:]  # TODO
 
                         new_tokens = inp + sampled_cot + ans
 
-                        # eq_pos = tokens.index("<sep>")
+                        # token ids for full sequence
                         token_ids = [dictionary[t] for t in new_tokens]
 
                         input_ids = torch.tensor(token_ids, dtype=torch.long)
@@ -81,16 +88,27 @@ class PairwiseAlignmentDataset(CurriculumDataset):
                         label_ids = torch.cat([label_ids[1:], torch.tensor([dictionary["<eos>"]], dtype=torch.long)])
                         # ignore the labels before the <sep>
                         label_ids[:sep1] = config["ignore_index"]
-                        xs.append(input_ids)
-                        ys.append(label_ids)
+
+                        if self.is_coconut:
+                            # store input tokens and CoT+answer separately for coconut mode
+                            inp_ids = [dictionary[t] for t in inp]
+                            cot_ans_ids = [dictionary[t] for t in sampled_cot + ans]
+                            xs.append((inp_ids, cot_ans_ids, label_ids))
+                        else:
+                            xs.append(input_ids)
+                            ys.append(label_ids)
                     else:
                         inp = tokens[: sep1 + 1]  # <sep> まで含む
                         ans = tokens[sep2 + 1]  # 次のトークン（解答）
                         token_ids = [dictionary[t] for t in inp]
                         input_ids = torch.tensor(token_ids, dtype=torch.long)
                         label_id = torch.tensor(dictionary[ans], dtype=torch.long)
-                        xs.append(input_ids)
-                        ys.append(label_id)
+                        if self.is_coconut:
+                            ids = [dictionary[t] for t in inp]
+                            xs.append((ids, [], label_id))
+                        else:
+                            xs.append(input_ids)
+                            ys.append(label_id)
 
                 self.X[length] = xs
                 self.Y[length] = ys
@@ -113,9 +131,25 @@ class PairwiseAlignmentDataset(CurriculumDataset):
 
     def __getitem__(self, idx: int):
         length = self.curriculum.sample_sequence_length() if self.curriculum else self.max_input_size
-        inp = self.X[length][idx]
-        tgt = self.Y[length][idx]
-        return inp, tgt
+        if self.chain:
+            # coconut mode stores tuples (inp_ids, cot_ids, tgt)
+            if self.is_coconut:
+                if self.split == "train":
+                    entry = self.X[length][idx]
+                    if isinstance(entry, tuple) and len(entry) == 3:
+                        inp, cot, tgt = entry
+                        inp_tensor = torch.tensor(inp, dtype=torch.long)
+                        cot_tensor = torch.tensor(cot, dtype=torch.long)
+                        tgt_tensor = tgt if isinstance(tgt, torch.Tensor) else torch.tensor(tgt, dtype=torch.long)
+                        return inp_tensor, cot_tensor, tgt_tensor
+                    # fallback to legacy format
+            inp = self.X[length][idx]
+            tgt = self.Y[length][idx]
+            return inp, tgt
+        else:
+            inp = self.X[length][idx]
+            tgt = self.Y[length][idx]
+            return inp, tgt
 
 
 class PairwiseAlignmentTask(GeneralizationTask):
@@ -164,7 +198,7 @@ class LongestCommonSubsequenceTask(PairwiseAlignmentTask):
         self.config = config
 
 
-class EditDistanceTaskChain(GeneralizationTask):
+class EditDistanceTaskChain(GeneralizationTaskChain):
     def __init__(self, max_input_size: int = 64, cot_length: int = None) -> None:
         config = {
             "name": "edit_distance",
@@ -198,20 +232,6 @@ class EditDistanceTaskChain(GeneralizationTask):
 
         accuracy = (final_preds == final_tgts).float().mean()
         return accuracy
-
-    @staticmethod
-    def collate_fn(batch):
-        PAD_ID = 0
-        IGNORE_ID = -100
-        seqs, labels = zip(*batch)
-        padded_inp = pad_sequence(seqs, batch_first=True, padding_value=PAD_ID)  # (B, L_max)
-
-        if isinstance(labels[0], torch.Tensor) and labels[0].dim() == 0:
-            padded_tgt = torch.stack(labels)
-        else:
-            padded_tgt = pad_sequence(labels, batch_first=True, padding_value=IGNORE_ID)
-
-        return padded_inp, padded_tgt
 
 
 if __name__ == "__main__":
