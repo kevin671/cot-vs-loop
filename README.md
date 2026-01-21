@@ -1,6 +1,6 @@
-# Chain-of-Thought vs. Latent Thought
+# Chain of thought vs. latent thought
 
-This repository provides the official implementation of the experiments in [A Formal Comparison Between Chain-of-Thought and Latent Thought](https://arxiv.org/abs/2505.19245).
+This repository provides the official implementation of [A Formal Comparison Between Chain-of-Thought and Latent Thought](https://arxiv.org/abs/2505.19245).
 
 
 ## Installation
@@ -13,6 +13,8 @@ conda activate cotloop
 
 ## Experiments
 
+regular curiculm for looped
+
 ### Word Problem
 
 Generate dataset.
@@ -22,8 +24,7 @@ python gen_data/word.py --group=S5 --k=64 --data_dir data/word_problem --samples
 
 Train and evaluate.
 ```shell
-python -m experiments.train --task word --input_size 64 --model GPT --n_layer 2 --is_causal --chain
-python -m experiments.train_distill --task word --input_size 64 --model CT --n_layer 2 --n_step 8 --is_causal
+python -m experiments.train --task word --input_size 64 --model GPT --n_layer 2 --chain
 python -m experiments.train --task word --input_size 64 --model Looped --n_layer 2 --n_loop 8 --is_causal
 ```
 
@@ -37,9 +38,8 @@ python gen_data/path.py --num_nodes 32 --train_size 1000000 --test_size 100000 -
 
 Train and evaluate.
 ```shell
-python -m experiments.train --task path --input_size 16 --model GPT --n_layer 2 --is_causal --chain
-python -m experiments.train_distill --task path --input_size 16 --model CT --n_layer 2 --n_step 8 --is_causal
-python -m experiments.train --task path --input_size 32 --model Looped --n_layer 2 --n_loop 8 --is_causal
+python -m experiments.train --task path --input_size 16 --model GPT --n_layer 2 -chain
+python -m experiments.train --task path --input_size 32 --model Looped --n_layer 2 --n_loop 8
 ```
 
 ### Arithmetic Expression
@@ -52,33 +52,25 @@ python gen_data/arithmetic.py --max_depth 32 --train_size 1000000 --test_size 10
 
 Train and evaluate.
 ```shell
-python -m experiments.train --task ed --input_size 16 --model GPT --n_layer 1 --n_loop 8 --curriculum fixed_length --make_chain
-python -m experiments.train --task ed --input_size 32 --model TMLT --n_layer 1 --n_loop 8 --curriculum fixed_length
-python -m experiments.train --task ed --input_size 16 --model TMLT --n_layer 1 --n_loop 8 --curriculum fixed_length
+python -m experiments.train --task arithmetic --input_size 16 --model GPT --n_layer 2 --chain
+python -m experiments.train --task arithmetic --input_size 32 --model TMLT --n_layer 1 --n_loop 8 --curriculum regular
 ```
 
 ### Edit Distance
 ```shell
 python gen_data/strings.py --length 16 --train_size 1000 --test_size 100 --data_dir data/ed --make_chain
-
 python gen_data/strings.py --length 32 --train_size 1000000 --test_size 100000 --data_dir data/ed
-
-# CoT
-python -m experiments.train --task ed --input_size 16 --model GPT --n_layer 1 --n_loop 8 --curriculum fixed_length --make_chain
-# Loop
-python -m experiments.train --task ed --input_size 32 --model TMLT --n_layer 1 --n_loop 8 --curriculum fixed_length
-# CT
-python -m experiments.train --task ed --input_size 16 --model TMLT --n_layer 1 --n_loop 8 --curriculum fixed_length
 ```
 
-### ProsQA
-
-Get `prosqa_train.json`, `prosqa_test.json`, and `prosqa_valid.json` from [Coconut](https://github.com/facebookresearch/coconut) and place on `./data`.
-
+Train and evaluate.
 ```shell
-torchrun --nnodes 1 --nproc_per_node 1 experiments/train_prosqa.py tasks/prontoqa/prosqa_cot.yaml
-torchrun --nnodes 1 --nproc_per_node 1 experiments/train_prosqa.py tasks/prontoqa/prosqa_coconut.yaml
-torchrun --nnodes 1 --nproc_per_node 1 experiments/train_prosqa.py tasks/prontoqa/prosqa_looplm.yaml
+python -m experiments.train --task ed --input_size 16 --model GPT --n_layer 2 --chain
+python -m experiments.train --task ed --input_size 32 --model TMLT --n_layer 1 --n_loop 8 --curriculum fixed_length
+```
+
+For stepwise internalization.
+```shell
+python -m experiments.train_distill --task ed --input_size 16 --model GPT --n_layer 2 --epochs_per_stage 16 --remove_per_stage 8 \
 ```
 
 ###  Counting
@@ -92,17 +84,17 @@ python gen_data/dnf.py
 
 Train and evaluate.
 ```shell
-python -m experiments.train_dnf --model GPT --chain --steps_per_epoch 10000 --num_mc_samples 1000
-python -m experiments.train_dnf --model CT/Looped --epoch 10 --n_step/n_loop 100
+python -m experiments.train_counting --task dnf --model GPT --chain --steps_per_epoch 10000 --num_mc_samples 1000
+python -m experiments.train_counting --task dnf --model Looped --epoch 10 n_loop 100
 ```
 
 ### Approximate Sampling of Graph Coloring
-
 Train and evaluate.
 ```shell
-python -m experiments.train_dnf --model GPT --coloring_mcmc_steps 10 --chain --steps_per_epoch 10000 --num_mc_samples 50000
-python -m experiments.train_dnf --model Looped --n_step/n_loop 30
+python -m experiments.train_counting --task coloring --model GPT --coloring_mcmc_steps 10 --chain
+python -m experiments.train_counting --task coloring --model Looped n_loop 30
 ```
+
 
 ## Acknowledgement
 - [Leveraging Neural Networks for Approximate DNF Counting (AAAI 2020)](https://github.com/ralphabb/NeuralDNF)
