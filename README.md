@@ -1,7 +1,6 @@
-# Chain of thought vs. latent thought
+# Chain of Thought vs. Latent Thought (Looped LM)
 
-This repository provides the official implementation of [A Formal Comparison Between Chain-of-Thought and Latent Thought](https://arxiv.org/abs/2505.19245).
-
+This repository provides the official implementation of [A Formal Comparison Between Chain-of-Thought and Latent Thought (ICML 2026)](https://arxiv.org/abs/2505.19245).
 
 ## Installation
 ```shell
